@@ -1,7 +1,6 @@
 """Platform-specific build configurations."""
 
 load("@com_github_grpc_grpc//bazel:generate_cc.bzl", "generate_cc")
-load("@com_google_protobuf//:protobuf.bzl", "proto_gen")
 load("@tsl//third_party/py/rules_pywrap:pywrap.bzl", "use_pywrap_rules")
 load(
     "@xla//xla/tsl:tsl.bzl",
@@ -10,6 +9,7 @@ load(
     "if_tsl_link_protobuf",
 )
 load("@xla//xla/tsl/platform:build_config_root.bzl", "if_static")
+load(":proto_gen.bzl", "proto_gen")
 
 def well_known_proto_libs():
     """Set of standard protobuf protos, like Any and Timestamp.
@@ -206,8 +206,7 @@ def cc_proto_library(
     if protolib_name == None:
         protolib_name = name
 
-    genproto_deps = ([s + "_genproto" for s in protolib_deps] +
-                     ["@com_google_protobuf//:cc_wkt_protos_genproto"])
+    genproto_deps = ([s + "_genproto" for s in protolib_deps])
     if internal_bootstrap_hack:
         # For pre-checked-in generated files, we add the internal_bootstrap_hack
         # which will skip the codegen action.
@@ -230,7 +229,7 @@ def cc_proto_library(
     grpc_cpp_plugin = None
     plugin_options = []
     if use_grpc_plugin:
-        grpc_cpp_plugin = "//external:grpc_cpp_plugin"
+        grpc_cpp_plugin = "@com_github_grpc_grpc//src/compiler:grpc_cpp_plugin"
         if use_grpc_namespace:
             plugin_options = ["services_namespace=grpc"]
 
@@ -254,7 +253,7 @@ def cc_proto_library(
 
     if use_grpc_plugin:
         cc_libs += select({
-            "//conditions:default": ["//external:grpc_lib"],
+            "//conditions:default": ["@com_github_grpc_grpc//:grpc++"],
         })
 
     impl_name = name + "_impl"
@@ -347,14 +346,14 @@ def cc_grpc_library(
     proto_targets += srcs
 
     extra_deps += select({
-        "//conditions:default": ["//external:grpc_lib"],
+        "//conditions:default": ["@com_github_grpc_grpc//:grpc++"],
     })
 
     codegen_grpc_target = "_" + name + "_grpc_codegen"
     generate_cc(
         name = codegen_grpc_target,
         srcs = proto_targets,
-        plugin = "//external:grpc_cpp_plugin",
+        plugin = "@com_github_grpc_grpc//src/compiler:grpc_cpp_plugin",
         well_known_protos = well_known_protos,
         generate_mocks = generate_mocks,
         flags = ["services_namespace=" + service_namespace],
@@ -416,17 +415,17 @@ def py_proto_library(
 
     grpc_python_plugin = None
     if use_grpc_plugin:
-        grpc_python_plugin = "//external:grpc_python_plugin"
+        grpc_python_plugin = "@com_github_grpc_grpc//src/compiler:grpc_python_plugin"
         # Note: Generated grpc code depends on Python grpc module. This dependency
         # is not explicitly listed in py_libs. Instead, host system is assumed to
         # have grpc installed.
 
     genproto_deps = []
     for dep in deps:
-        if dep != "@com_google_protobuf//:protobuf_python":
+        if dep != "@com_google_protobuf//:protobuf_python" and dep != "@@protobuf~//:protobuf_python":
             genproto_deps.append(dep + "_genproto")
-        else:
-            genproto_deps.append("@com_google_protobuf//:well_known_types_py_pb2_genproto")
+    #    else:
+    #        genproto_deps.append("@com_google_protobuf//:well_known_types_py_pb2")
 
     proto_gen(
         name = name + "_genproto",

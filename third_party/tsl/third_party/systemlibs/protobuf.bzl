@@ -235,7 +235,7 @@ def cc_proto_library(
 
     grpc_cpp_plugin = None
     if use_grpc_plugin:
-        grpc_cpp_plugin = "//external:grpc_cpp_plugin"
+        grpc_cpp_plugin = "@com_github_grpc_grpc//src/compiler:grpc_cpp_plugin"
 
     gen_srcs = _CcSrcs(srcs, use_grpc_plugin)
     gen_hdrs = _CcHdrs(srcs, use_grpc_plugin)
@@ -257,7 +257,7 @@ def cc_proto_library(
     if default_runtime and not default_runtime in cc_libs:
         cc_libs = cc_libs + [default_runtime]
     if use_grpc_plugin:
-        cc_libs = cc_libs + ["//external:grpc_lib"]
+        cc_libs = cc_libs + ["@com_github_grpc_grpc//:grpc++"]
 
     native.cc_library(
         name = name,
@@ -366,7 +366,7 @@ def py_proto_library(
 
     grpc_python_plugin = None
     if use_grpc_plugin:
-        grpc_python_plugin = "//external:grpc_python_plugin"
+        grpc_python_plugin = "@com_github_grpc_grpc//src/compiler:grpc_python_plugin"
         # Note: Generated grpc code depends on Python grpc module. This dependency
         # is not explicitly listed in py_libs. Instead, host system is assumed to
         # have grpc installed.

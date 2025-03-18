@@ -127,6 +127,12 @@ build --incompatible_enforce_config_setting_visibility
 # TODO: also enable this flag after fixing the visibility violations
 # build --incompatible_config_setting_private_default_visibility
 
+# TODO: Enable Bzlmod
+common --noenable_bzlmod
+
+# TODO: Migrate for https://github.com/bazelbuild/bazel/issues/7260
+common --noincompatible_enable_cc_toolchain_resolution
+
 # Print a stacktrace when a test is killed
 test --test_env="GTEST_INSTALL_FAILURE_SIGNAL_HANDLER=1"
 

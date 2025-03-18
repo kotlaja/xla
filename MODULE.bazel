@@ -1,0 +1,197 @@
+module(
+    name = "xla",
+    repo_name = "xla",
+)
+
+bazel_dep(name = "bazel_skylib", version = "1.7.1")
+bazel_dep(name = "protobuf", version = "29.3", repo_name = "com_google_protobuf")
+bazel_dep(name = "grpc", version = "1.70.1", repo_name = "com_github_grpc_grpc")
+bazel_dep(name = "grpc-java", version = "1.69.0")
+bazel_dep(name = "platforms", version = "0.0.11")
+bazel_dep(name = "rules_python", version = "1.1.0")
+bazel_dep(name = "abseil-py", version = "2.1.0", repo_name = "absl_py")
+bazel_dep(name = "rules_cc", version = "0.1.1")
+bazel_dep(name = "zlib", version = "1.3.1")
+bazel_dep(name = "curl", version = "8.8.0")
+bazel_dep(name = "boringssl", version = "0.20250212.0")
+bazel_dep(name = "cpuinfo", version = "0.0.0-20240417-3c8b153")
+bazel_dep(name = "fxdiv", version = "0.0.0-20201209-63058ef", repo_name = "FXdiv")
+bazel_dep(name = "snappy", version = "1.2.1")
+
+single_version_override(
+    module_name = "protobuf",
+    patch_strip = 1,
+    patches = ["//:protobuf_29.3.patch"],
+    version = "29.3",
+)
+
+# Configure Python toolchains and pip dependencies.
+# =================================================
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    # Allows building as root in a docker container. Required by oss-fuzz.
+    ignore_root_user_error = True,
+    is_default = True,
+    python_version = "3.11",
+)
+use_repo(python, "pythons_hub")
+use_repo(python, python = "python_3_11")
+
+ADDITIVE_BUILD_CONTENT = """
+cc_library(
+  name = "numpy_headers_2",
+  hdrs = glob(["site-packages/numpy/_core/include/**/*.h"]),
+  strip_include_prefix="site-packages/numpy/_core/include/",
+)
+cc_library(
+    name = "numpy_headers_1",
+    hdrs = glob(["site-packages/numpy/core/include/**/*.h"]),
+    strip_include_prefix="site-packages/numpy/core/include/",
+)
+cc_library(
+    name = "numpy_headers",
+    deps = [":numpy_headers_2", ":numpy_headers_1"],
+)
+"""
+
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+pip.whl_mods(
+    hub_name = "whl_mods_hub",
+    whl_name = "numpy",
+    additive_build_content = ADDITIVE_BUILD_CONTENT,
+)
+use_repo(pip, "whl_mods_hub")
+
+pip.parse(
+    hub_name = "pypi_whl",
+    python_version = "3.11",
+    requirements_lock = "requirements_lock_3_11.txt",
+    whl_modifications = {
+        "@whl_mods_hub//:numpy.json": "numpy",
+    },
+)
+use_repo(pip, pypi_numpy = "pypi_whl_311_numpy", pypi_lit = "pypi_whl_311_lit")
+
+bazel_dep(name = "pybind11_bazel", version = "2.13.6")
+bazel_dep(name = "pybind11_abseil", version = "202402.0")
+bazel_dep(name = "pybind11_protobuf", version = "0.0.0-20240524-1d7a729")
+bazel_dep(name = "rules_license", version = "1.0.0")
+bazel_dep(name = "google_benchmark", version = "1.9.1", repo_name = "com_google_benchmark")
+bazel_dep(name = "rules_python_gazelle_plugin", version = "1.2.0")
+# -- bazel_dep definitions -- #
+
+remote_execution_configure = use_repo_rule("//tools/toolchains/remote:configure.bzl", "remote_execution_configure")
+python_repository = use_repo_rule("//third_party/py:python_repo.bzl", "python_repository")
+# -- use_repo_rule statements -- #
+
+
+tf_vendored = use_repo_rule("//third_party:repo.bzl", "tf_vendored")
+tf_vendored(
+  name = "tsl",
+  relpath = "third_party/tsl",
+)
+
+remote_execution_configure(
+  name = "local_config_remote_execution",
+)
+
+python_repository(
+  name = "python_version_repo",
+  requirements_versions = [
+    "3.11"
+  ],
+  requirements_locks = [
+    "//:requirements_lock_3_11.txt"
+  ],
+  local_wheel_workspaces = [  ],
+  local_wheel_inclusion_list = [
+    "*"
+  ],
+  local_wheel_exclusion_list = [  ],
+)
+
+
+# -- repo definitions -- #
+
+extension_for_cuda_repo = use_extension("//:extension_for_cuda_repo.bzl", "extension_for_cuda_repo")
+use_repo(
+  extension_for_cuda_repo, 
+  "cuda_cccl",
+  "cuda_cublas",
+  "cuda_cudart",
+  "cuda_cupti",
+  "cuda_nvjitlink",
+  "cuda_nvml",
+  "cuda_nvcc",
+  "cuda_curand",
+  "cuda_cusparse",
+  "cuda_cufft",
+  "cuda_cusolver",
+  "cuda_nvtx")
+# End of extension `extension_for_cuda_repo`
+
+extension_for_tf_http_archive = use_extension("//:extension_for_tf_http_archive.bzl", "extension_for_tf_http_archive")
+use_repo(
+  extension_for_tf_http_archive, 
+  "ml_dtypes_py",
+  "stablehlo",
+  "triton",
+  "com_google_absl",
+  "eigen_archive",
+  "com_google_googletest",
+  "com_googlesource_code_re2",
+  "onednn",
+  "gloo",
+  "llvm_openmp",
+  "farmhash_archive",
+  "hwloc",
+  "XNNPACK",
+  "jsoncpp_git",
+  "shardy",
+  "mpitrampoline",
+  "nanobind",
+  "robin_map",
+  "dlpack",
+  "pybind11",
+  "ducc",
+  "implib_so",
+  "pthreadpool")
+# End of extension `extension_for_tf_http_archive`
+
+# LLVM project setup
+extension_for_llvm_raw = use_extension("//:extension_for_llvm_raw.bzl", "extension_for_llvm_raw")
+use_repo(extension_for_llvm_raw, "llvm-raw")
+extension_for_llvm_project = use_extension("//:extension_for_llvm_project.bzl", "extension_for_llvm_project")
+use_repo(extension_for_llvm_project, "llvm-project")
+# End of extension `extension_for_llvm_raw` and `extension_for_llvm_project`
+
+extension_for_python_configure = use_extension("//:extension_for_python_configure.bzl", "extension_for_python_configure")
+use_repo(extension_for_python_configure, "local_config_python")
+# End of extension `extension_for_python_configure`
+
+extension_for_tensorrt_configure = use_extension("//:extension_for_tensorrt_configure.bzl", "extension_for_tensorrt_configure")
+use_repo(extension_for_tensorrt_configure, "local_config_tensorrt")
+# End of extension `extension_for_tensorrt_configure`
+
+extension_for_cuda_configure = use_extension("//:extension_for_cuda_configure.bzl", "extension_for_cuda_configure")
+use_repo(extension_for_cuda_configure, "local_config_cuda")
+use_repo(extension_for_cuda_configure, "local_config_nccl")
+# End of extension `extension_for_cuda_configure`
+
+extension_for_rocm_configure = use_extension("//:extension_for_rocm_configure.bzl", "extension_for_rocm_configure")
+use_repo(extension_for_rocm_configure, "local_config_rocm")
+# End of extension `extension_for_rocm_configure`
+
+extension_for_sycl_configure = use_extension("//:extension_for_sycl_configure.bzl", "extension_for_sycl_configure")
+use_repo(extension_for_sycl_configure, "local_config_sycl")
+# End of extension `extension_for_sycl_configure`
+
+# Use a more recent tcmalloc version than is available in the bazel repository.
+archive_override(
+  module_name = "or-tools",
+  urls = ["https://github.com/google/or-tools/releases/download/v9.12/or-tools-9.12.tar.gz"],
+  integrity = "sha256-y7e/7plAn4tXBMQgyaa8wQVJY5UliMGWUdT1uwSA9TQ=",
+  strip_prefix = "or-tools-9.12",
+)
+
+bazel_dep(name = "or-tools", repo_name = "com_google_ortools")

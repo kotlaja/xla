@@ -60,8 +60,8 @@ expand_template(
         "@MLIR_LIB_DIR@": package_path("@llvm-project//mlir:BUILD"),
         "@MLIR_BINARY_DIR@": package_path("@llvm-project//mlir:BUILD"),
         # Separate '@' (reference to main repo) to avoid confusing copybara.
-        "@MLIR_HLO_TOOLS_DIR@": package_path("@" + "//xla/mlir_hlo:BUILD"),
-        "@MLIR_HLO_SOURCE_DIR@": package_path("@" + "//xla/mlir_hlo:BUILD"),
+        "@MLIR_HLO_TOOLS_DIR@": package_path("@@" + "//xla/mlir_hlo:BUILD"),
+        "@MLIR_HLO_SOURCE_DIR@": package_path("@@" + "//xla/mlir_hlo:BUILD"),
     },
     template = "lit.site.cfg.py.in",
     visibility = ["//visibility:private"],

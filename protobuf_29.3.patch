@@ -1,0 +1,116 @@
+diff --git a/src/google/protobuf/BUILD.bazel b/src/google/protobuf/BUILD.bazel
+index faf2ea3f67..c5b16beb72 100644
+--- a/src/google/protobuf/BUILD.bazel
++++ b/src/google/protobuf/BUILD.bazel
+@@ -742,7 +742,13 @@ cc_library(
+     hdrs = glob([
+         "**/*.h",
+         "**/*.inc",
+-    ]),
++    ]) + [
++        "//src/google/protobuf/io:io_headers",
++        "//src/google/protobuf/stubs:stubs_headers",
++        "//src/google/protobuf/testing:testing_headers",
++        "//src/google/protobuf/util:util_headers",
++        "//src/google/protobuf/json:json_headers",
++    ],
+     strip_include_prefix = "/src",
+ )
+
+diff --git a/src/google/protobuf/testing/BUILD.bazel b/src/google/protobuf/testing/BUILD.bazel
+index e36afc2538..aaaf37991e 100644
+--- a/src/google/protobuf/testing/BUILD.bazel
++++ b/src/google/protobuf/testing/BUILD.bazel
+@@ -9,6 +9,14 @@ package(
+     default_visibility = ["//:__subpackages__"],
+ )
+ 
++filegroup(
++    name = "testing_headers",
++    srcs = glob([
++        "**/*.h",
++        "**/*.inc",
++    ]),
++)
++
+ cc_library(
+     name = "file",
+     srcs = ["file.cc"],
+diff --git a/src/google/protobuf/io/BUILD.bazel b/src/google/protobuf/io/BUILD.bazel
+index ab4ae6d1b5..fe8f7c8ae7 100644
+--- a/src/google/protobuf/io/BUILD.bazel
++++ b/src/google/protobuf/io/BUILD.bazel
+@@ -8,6 +8,14 @@ package(
+     default_visibility = ["//visibility:public"],
+ )
+ 
++filegroup(
++    name = "io_headers",
++    srcs = glob([
++        "**/*.h",
++        "**/*.inc",
++    ]),
++)
++
+ cc_library(
+     name = "io",
+     srcs = [
+diff --git a/src/google/protobuf/stubs/BUILD.bazel b/src/google/protobuf/stubs/BUILD.bazel
+index 554615de89..cc9417033f 100644
+--- a/src/google/protobuf/stubs/BUILD.bazel
++++ b/src/google/protobuf/stubs/BUILD.bazel
+@@ -9,6 +9,14 @@ package(
+     default_visibility = ["//:__subpackages__"],
+ )
+ 
++filegroup(
++    name = "stubs_headers",
++    srcs = glob([
++        "**/*.h",
++        "**/*.inc",
++    ]),
++)
++
+ cc_library(
+     name = "lite",
+     srcs = [
+diff --git a/src/google/protobuf/util/BUILD.bazel b/src/google/protobuf/util/BUILD.bazel
+index 32f33810c0..3602d6a1aa 100644
+--- a/src/google/protobuf/util/BUILD.bazel
++++ b/src/google/protobuf/util/BUILD.bazel
+@@ -8,6 +8,15 @@ load("//bazel:cc_proto_library.bzl", "cc_proto_library")
+ load("//bazel:proto_library.bzl", "proto_library")
+ load("//build_defs:cpp_opts.bzl", "COPTS")
+ 
++filegroup(
++    name = "util_headers",
++    srcs = glob([
++        "**/*.h",
++        "**/*.inc",
++    ]),
++    visibility = ["//:__subpackages__"],
++)
++
+ cc_library(
+     name = "delimited_message_util",
+     srcs = ["delimited_message_util.cc"],
+diff --git a/src/google/protobuf/json/BUILD.bazel b/src/google/protobuf/json/BUILD.bazel
+index fda7a5bfc5..802ad69b12 100644
+--- a/src/google/protobuf/json/BUILD.bazel
++++ b/src/google/protobuf/json/BUILD.bazel
+@@ -10,6 +10,15 @@ package(
+ 
+ licenses(["notice"])
+ 
++filegroup(
++    name = "json_headers",
++    srcs = glob([
++        "**/*.h",
++        "**/*.inc",
++    ]),
++    visibility = ["//:__subpackages__"],
++)
++
+ cc_library(
+     name = "json",
+     srcs = ["json.cc"],

@@ -550,6 +550,12 @@ cc_library(
 )
 
 bzl_library(
+    name = "proto_gen_bzl",
+    srcs = ["proto_gen.bzl"],
+    visibility = internal_visibility(["//third_party/tensorflow:__subpackages__"]),
+)
+
+bzl_library(
     name = "cuda_build_defs_bzl",
     srcs = ["cuda_build_defs.bzl"],
     # copybara:uncomment_begin

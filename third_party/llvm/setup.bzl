@@ -18,6 +18,7 @@ def llvm_setup(name):
     # Build @llvm-project from @llvm-raw using overlays.
     llvm_configure(
         name = name,
-        repo_mapping = {"@python_runtime": "@local_config_python"},
+        # TODO(kotlaja): Is this okay to skip?
+        # repo_mapping = {"@python_runtime": "@local_config_python"},
         targets = _LLVM_TARGETS,
     )

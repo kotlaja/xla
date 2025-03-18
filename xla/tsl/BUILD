@@ -129,7 +129,7 @@ config_setting(
         [],
     ),
     values = if_oss(
-        {"crosstool_top": "//external:android/crosstool"},
+        {"crosstool_top": "@com_github_grpc_grpc//src/compiler:android/crosstool"},
         {},
     ),
     visibility = ["//visibility:public"],
@@ -142,7 +142,7 @@ config_setting(
         [],
     ),
     values = if_oss(
-        {"crosstool_top": "//external:android/emscripten"},
+        {"crosstool_top": "@com_github_grpc_grpc//src/compiler:android/emscripten"},
         {},
     ),
     visibility = ["//visibility:public"],
@@ -277,7 +277,7 @@ config_setting(
     ),
     values = dict(
         if_oss(
-            {"crosstool_top": "//external:android/crosstool"},
+            {"crosstool_top": "@com_github_grpc_grpc//src/compiler:android/crosstool"},
         ),
         cpu = "armeabi-v7a",
     ),
@@ -441,7 +441,7 @@ config_setting(
     ),
     values = dict(
         if_oss(
-            {"crosstool_top": "//external:android/crosstool"},
+            {"crosstool_top": "@com_github_grpc_grpc//src/compiler:android/crosstool"},
         ),
         cpu = "x86",
     ),

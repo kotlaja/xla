@@ -32,19 +32,19 @@ def repo():
         "utility",
     ]
     SYS_LINKS = {
-        "//third_party/absl:system.absl.{name}.BUILD".format(name = n): "absl/{name}/BUILD.bazel".format(name = n)
+        "@tsl//third_party/absl:system.absl.{name}.BUILD".format(name = n): "absl/{name}/BUILD.bazel".format(name = n)
         for n in SYS_DIRS
     }
 
     tf_http_archive(
         name = "com_google_absl",
         sha256 = ABSL_SHA256,
-        build_file = "//third_party/absl:com_google_absl.BUILD",
-        system_build_file = "//third_party/absl:system.BUILD",
+        build_file = "@tsl//third_party/absl:com_google_absl.BUILD",
+        system_build_file = "@tsl//third_party/absl:system.BUILD",
         system_link_files = SYS_LINKS,
         strip_prefix = "abseil-cpp-{commit}".format(commit = ABSL_COMMIT),
         urls = tf_mirror_urls("https://github.com/abseil/abseil-cpp/archive/{commit}.tar.gz".format(commit = ABSL_COMMIT)),
         patch_file = [
-            "//third_party/absl:nvidia_jetson.patch",
+            "@tsl//third_party/absl:nvidia_jetson.patch",
         ],
     )

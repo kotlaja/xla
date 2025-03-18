@@ -102,6 +102,8 @@ _tf_http_archive = repository_rule(
     environ = ["TF_SYSTEM_LIBS"],
 )
 
+# extension_for_tf_http_archive = module_extension(implementation = _tf_http_archive_impl)
+
 def tf_http_archive(name, sha256, urls, **kwargs):
     """Downloads and creates Bazel repos for dependencies.
 
