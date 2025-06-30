@@ -47,10 +47,10 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/parser/hlo_parser.h"
 #include "xla/hlo/testlib/filecheck.h"
+#include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
 #include "xla/mlir_hlo/mhlo/IR/hlo_ops.h"
 #include "xla/service/llvm_ir/llvm_util.h"
 #include "xla/status_macros.h"
-#include "xla/tests/hlo_test_base.h"
 #include "xla/tsl/lib/core/status_test_util.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/statusor.h"
@@ -61,7 +61,7 @@ namespace {
 
 using ::testing::HasSubstr;
 
-class ElementalHloToMlirTest : public HloTestBase {
+class ElementalHloToMlirTest : public HloHardwareIndependentTestBase {
  public:
   ElementalHloToMlirTest() {
     context_.loadDialect<mlir::tensor::TensorDialect, mlir::func::FuncDialect,
@@ -468,33 +468,6 @@ TEST_F(ElementalHloToMlirTest, Gather) {
     // CHECK-DAG:    %[[C0:.*]] = arith.constant 0
     // CHECK-DAG:    %[[C26:.*]] = arith.constant 26
     // CHECK:        %[[IDX_I32:.*]] = tensor.extract %[[ARG1]][%[[X]], %[[C0]]]
-    // CHECK:        %[[IDX:.*]] = arith.index_cast %[[IDX_I32]] : i32 to index
-    // CHECK:        %[[CLAMP_HIGH:.*]] = arith.minsi %[[IDX]], %[[C26]]
-    // CHECK:        %[[CLAMPED:.*]] = arith.maxsi %[[CLAMP_HIGH]], %[[C0]]
-    // CHECK:        %[[X_IN:.*]] = arith.addi %[[CLAMPED]], %[[Y]]
-    // CHECK:        %[[RET:.*]] = tensor.extract %[[ARG0]][%[[X_IN]], %[[Z]]]
-    // CHECK:        return %[[RET]]
-  )"));
-}
-
-TEST_F(ElementalHloToMlirTest, GatherWithImplicitVectorDim) {
-  TF_EXPECT_OK(Run(R"(
-    ENTRY main {
-      operand = f32[33,34] parameter(0)
-      indices = s32[1806] parameter(1)
-      ROOT r = f32[1806,7,8] gather(operand, indices), offset_dims={1,2},
-                                 collapsed_slice_dims={}, start_index_map={0},
-                                 index_vector_dim=1, slice_sizes={7,8}
-    })",
-                   R"(
-    // CHECK:      @main_r(
-    // CHECK-SAME:     %[[ARG0:.*]]: tensor<33x34xf32>,
-    // CHECK-SAME:     %[[ARG1:.*]]: tensor<1806xi32>,
-    // CHECK-SAME:     %[[X:.*]]: index {{{.*}}}, %[[Y:.*]]: index {{{.*}}},
-    // CHECK-SAME:     %[[Z:.*]]: index {{{.*}}}
-    // CHECK-DAG:    %[[C0:.*]] = arith.constant 0
-    // CHECK-DAG:    %[[C26:.*]] = arith.constant 26
-    // CHECK:        %[[IDX_I32:.*]] = tensor.extract %[[ARG1]][%[[X]]]
     // CHECK:        %[[IDX:.*]] = arith.index_cast %[[IDX_I32]] : i32 to index
     // CHECK:        %[[CLAMP_HIGH:.*]] = arith.minsi %[[IDX]], %[[C26]]
     // CHECK:        %[[CLAMPED:.*]] = arith.maxsi %[[CLAMP_HIGH]], %[[C0]]
@@ -1464,18 +1437,6 @@ TEST_F(ElementalHloToMlirEpilogueTest, XlaGpuEntry) {
                    /*xla_backend=*/xla::BackendKind::kGpu));
 }
 
-TEST_F(ElementalHloToMlirEpilogueTest, XlaCpuEntry) {
-  TF_EXPECT_OK(Run(kHlo,
-                   R"(
-      // CHECK:      @main_add(
-      // CHECK-SAME:     %[[ARG0:.*]]: tensor<7xf32>
-      // main_transpose must still have arg0, but the pure_call must not.
-      // CHECK:          %[[PURE:.*]] = xla.pure_call @main_transpose(%arg1,
-      // CHECK:      @main_transpose(tensor<7xf32)",
-                   EpilogueSpec(), /*set_xla_entry=*/true,
-                   /*xla_backend=*/xla::BackendKind::kCpu));
-}
-
 TEST_F(ElementalHloToMlirTest, ScalarConstant) {
   TF_EXPECT_OK(Run(R"(
     ENTRY main {
@@ -1617,21 +1578,6 @@ TEST_F(ElementalHloToMlirTest, DynamicSliceUnsignedIndices) {
   )"));
 }
 
-TEST_F(ElementalHloToMlirTest, DynamicSliceIndexIsNotCanonical_NotSupported) {
-  auto status = Run(R"(
-    ENTRY main {
-      in = f32[20,30] parameter(0)
-      idx = s32[2] parameter(1)
-      ROOT slice = f32[4,5] dynamic-slice(in, idx), dynamic_slice_sizes={4,5}
-    })",
-                    "");
-
-  EXPECT_EQ(status.code(), absl::StatusCode::kFailedPrecondition);
-  EXPECT_THAT(status.message(),
-              HasSubstr("Dynamic indexing instruction with non-scalar index is "
-                        "not supported."));
-}
-
 TEST_F(ElementalHloToMlirTest, DynamicUpdateSlice) {
   TF_EXPECT_OK(Run(R"(
     ENTRY main {
@@ -1706,23 +1652,6 @@ TEST_F(ElementalHloToMlirTest, DynamicUpdateSliceUnsigned) {
   )"));
 }
 
-TEST_F(ElementalHloToMlirTest,
-       DynamicUpdateSliceIndexIsNotCanonical_NotSupported) {
-  auto status = Run(R"(
-    ENTRY main {
-      in = f32[20,30] parameter(0)
-      updates = f32[5,6] parameter(1)
-      idx = s32[2] parameter(2)
-      ROOT updated = f32[20,30] dynamic-update-slice(in, updates, idx)
-    })",
-                    "");
-
-  EXPECT_EQ(status.code(), absl::StatusCode::kFailedPrecondition);
-  EXPECT_THAT(status.message(),
-              HasSubstr("Dynamic indexing instruction with non-scalar index is "
-                        "not supported."));
-}
-
 TEST_F(ElementalHloToMlirTest, IotaUnsigned) {
   TF_EXPECT_OK(Run(R"(
     ENTRY main {
@@ -1770,31 +1699,6 @@ TEST_F(ElementalHloToMlirTest, MixedIndexingTuple) {
     // CHECK-SAME:       d0 in [0, 9], d1 in [0, 9]">(%[[X]], %[[Y]])
     // CHECK:        %[[B:.*]] = tensor.extract %[[P1]][%[[IDX]]]
     // CHECK:        return %[[A]], %[[B]]
-  )"));
-}
-
-TEST_F(ElementalHloToMlirTest, NestedTuple) {
-  TF_EXPECT_OK(Run(R"(
-    ENTRY main {
-      %p0 = f32[10,10] parameter(0)
-      %p1 = f32[100] parameter(1)
-      %t0 = (f32[10,10], f32[100]) tuple(%p0, %p1)
-      %t1 = (f32[100], f32[10,10]) tuple(%p1, %p0)
-      ROOT tuple = ((f32[10,10], f32[100]), f32[100], (f32[100], f32[10,10]))
-        tuple(%t0, %p1, %t1)
-    })",
-                   R"(
-    // CHECK:      @main_tuple(
-    // CHECK-SAME:     %[[P0:.*]]: tensor<10x10xf32>,
-    // CHECK-SAME:     %[[P1:.*]]: tensor<100xf32>,
-    // CHECK-SAME:     %[[X:.*]]: index {{{.*}}}, %[[Y:.*]]: index {{{.*}}}
-    // CHECK:          %[[P0_V:.*]] = xla.pure_call @main_p0
-    // CHECK:          %[[IDX:.*]] =
-    // CHECK-SAME:       #xla.indexing_map<"(d0, d1) -> (d0 * 10 + d1),
-    // CHECK-SAME:       d0 in [0, 9], d1 in [0, 9]">(%[[X]], %[[Y]])
-    // CHECK:          %[[P1_V:.*]] = xla.pure_call @main_p1
-    // CHECK-SAME:       (%[[P0]], %[[P1]], %[[IDX]])
-    // CHECK:          return %[[P0_V]], %[[P1_V]], %[[P1_V]], %[[P1_V]], %[[P0_V]]
   )"));
 }
 
@@ -1847,6 +1751,64 @@ TEST_F(ElementalHloToMlirTest, BroadcastSelect) {
     // CHECK-DAG: tensor.extract %[[P1]][%[[X]], %[[Y]]]
     // CHECK-DAG: tensor.extract %[[P2]][%[[X]], %[[Y]]]
   )"));
+}
+
+TEST_F(ElementalHloToMlirTest, DotC64) {
+  TF_EXPECT_OK(Run(
+      R"(
+HloModule c64_dot_test
+
+ENTRY main {
+  p0 = c64[4] parameter(0)
+  p1 = c64[4] parameter(1)
+  dot = c64[] dot(p0, p1), lhs_contracting_dims={0}, rhs_contracting_dims={0}
+  ROOT out = c64[] add(dot, dot)
+}
+      )",
+      R"(
+      // CHECK: func.func private @main_out(
+      // CHECK-SAME: %[[ARG0:.*]]: tensor<4xcomplex<f32>>,
+      // CHECK-SAME: %[[ARG1:.*]]: tensor<4xcomplex<f32>>
+      // CHECK:   %[[CST0:.*]] = arith.constant 0.000000e+00 : f32
+      // CHECK:   %[[INIT:.*]] = complex.create %[[CST0]], %[[CST0]] : complex<f32>
+      // CHECK:   %[[DOTRESULT:.*]] = scf.for {{.*}} = {{.*}} to {{.*}} step {{.*}} iter_args({{.*}} = %[[INIT]]) -> (complex<f32>) {
+      // CHECK:     %[[EXTRACTED:.*]] = tensor.extract %[[ARG0]][{{.*}}]
+      // CHECK:     %[[EXTRACTED0:.*]] = tensor.extract %[[ARG1]][{{.*}}]
+      // CHECK:     %[[MUL:.*]] = complex.mul %[[EXTRACTED]], %[[EXTRACTED0]]
+      // CHECK:     %[[NEXTACC:.*]] = complex.add {{.*}}, %[[MUL]]
+      // CHECK:     scf.yield %[[NEXTACC]]
+      // CHECK:   %[[OUT:.*]] = complex.add %[[DOTRESULT]], %[[DOTRESULT]]
+      // CHECK:   return %[[OUT]]
+      )"));
+}
+
+TEST_F(ElementalHloToMlirTest, DotC128) {
+  TF_EXPECT_OK(Run(
+      R"(
+HloModule c128_dot_test
+
+ENTRY main {
+  p0 = c128[3] parameter(0)
+  p1 = c128[3] parameter(1)
+  dot = c128[] dot(p0, p1), lhs_contracting_dims={0}, rhs_contracting_dims={0}
+  ROOT out = c128[] add(dot, dot)
+}
+      )",
+      R"(
+      // CHECK: func.func private @main_out(
+      // CHECK-SAME: %[[ARG0:.*]]: tensor<3xcomplex<f64>>,
+      // CHECK-SAME: %[[ARG1:.*]]: tensor<3xcomplex<f64>>
+      // CHECK:   %[[CST0:.*]] = arith.constant 0.000000e+00 : f64
+      // CHECK:   %[[INIT:.*]] = complex.create %[[CST0]], %[[CST0]] : complex<f64>
+      // CHECK:   %[[DOTRESULT:.*]] = scf.for {{.*}} = {{.*}} to {{.*}} step {{.*}} iter_args({{.*}} = %[[INIT]]) -> (complex<f64>) {
+      // CHECK:     %[[EXTRACTED:.*]] = tensor.extract %[[ARG0]][{{.*}}]
+      // CHECK:     %[[EXTRACTED0:.*]] = tensor.extract %[[ARG1]][{{.*}}]
+      // CHECK:     %[[MUL:.*]] = complex.mul %[[EXTRACTED]], %[[EXTRACTED0]]
+      // CHECK:     %[[NEXTACC:.*]] = complex.add {{.*}}, %[[MUL]]
+      // CHECK:     scf.yield %[[NEXTACC]]
+      // CHECK:   %[[OUT:.*]] = complex.add %[[DOTRESULT]], %[[DOTRESULT]]
+      // CHECK:   return %[[OUT]]
+      )"));
 }
 
 }  // namespace

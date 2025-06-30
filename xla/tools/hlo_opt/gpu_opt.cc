@@ -27,12 +27,13 @@ limitations under the License.
 #include "xla/service/compiler.h"
 #include "xla/service/dump.h"
 #include "xla/service/executable.h"
+#include "xla/service/gpu/alias_info.h"
 #include "xla/service/gpu/compile_module_to_llvm_ir.h"
 #include "xla/service/gpu/executable.pb.h"
 #include "xla/service/gpu/gpu_compiler.h"
 #include "xla/service/gpu/gpu_executable.h"
 #include "xla/service/gpu/gpu_hlo_schedule.h"
-#include "xla/service/gpu/transforms/all_gather_optimizer.h"
+#include "xla/service/gpu/transforms/collectives/all_gather_optimizer.h"
 #include "xla/service/gpu/transforms/cudnn_custom_call_converter.h"
 #include "xla/service/gpu/transforms/dot_algorithm_rewriter.h"
 #include "xla/service/gpu/transforms/dot_dimension_sorter.h"
@@ -41,7 +42,6 @@ limitations under the License.
 #include "xla/service/gpu/transforms/gemm_broadcast_folding_rewriter.h"
 #include "xla/service/gpu/transforms/gemm_fusion.h"
 #include "xla/service/gpu/transforms/gemv_rewriter.h"
-#include "xla/service/gpu/transforms/pipelined_p2p_rewriter.h"
 #include "xla/service/gpu/transforms/reduce_scatter_creator.h"
 #include "xla/service/gpu/transforms/reduction_degenerate_dim_remover.h"
 #include "xla/service/gpu/transforms/reduction_dimension_grouper.h"
@@ -53,6 +53,7 @@ limitations under the License.
 #include "xla/service/gpu/transforms/windowed_einsum_handler.h"
 #include "xla/service/llvm_ir/llvm_util.h"
 #include "xla/service/platform_util.h"
+#include "xla/service/spmd/schedule_aware_collective_ops_cse.h"
 #include "xla/stream_executor/cuda/cuda_compute_capability.h"
 #include "xla/stream_executor/device_description.h"
 #include "xla/stream_executor/platform.h"
@@ -115,9 +116,12 @@ class GpuOptProvider : public CompiledOptProvider {
     return GetRegisteredPassNamesHelper(pass_registry_);
   }
 
-  // Register only GPU specific passes here.
+  //////////////////////////////////////////////////////////////////////////////
+  // Registration of GPU-specific HLO Passes                                  //
+  //////////////////////////////////////////////////////////////////////////////
   void RegisterProviderPasses(HloModule& module) override {
     auto device_description = GetDeviceDescription(&module);
+    auto debug_config = module.config().debug_options();
     se::GpuComputeCapability gpu_compute_capability;
     if (device_description.ok()) {
       gpu_compute_capability = device_description->gpu_compute_capability();
@@ -137,7 +141,6 @@ class GpuOptProvider : public CompiledOptProvider {
     RegisterPass<gpu::GemmBroadcastFoldingRewriter>();
     RegisterPass<gpu::GemmFusion>(gpu_compute_capability);
     RegisterPass<gpu::GemvRewriter>();
-    RegisterPass<gpu::PipelinedP2PRewriter>();
     RegisterPass<gpu::ReduceScatterCreator>();
     RegisterPass<gpu::ReductionDegenerateDimRemover>();
     RegisterPass<gpu::ReductionDimensionGrouper>();
@@ -148,6 +151,12 @@ class GpuOptProvider : public CompiledOptProvider {
     RegisterPass<gpu::TransposeDimensionGrouper>();
     RegisterPass<gpu::WindowedEinsumHandler>();
     // go/keep-sorted end
+    if (debug_config.xla_gpu_experimental_collective_cse_distance_threshold() >
+        0) {
+      RegisterPass<ScheduleAwareCollectiveOpsCSE>(
+          debug_config.xla_gpu_experimental_collective_cse_distance_threshold(),
+          false);
+    }
   }
 
  private:
@@ -167,10 +176,12 @@ class GpuOptProvider : public CompiledOptProvider {
                         GetDeviceDescription(optimized_module));
     TF_ASSIGN_OR_RETURN(se::Platform * platform,
                         PlatformUtil::GetPlatform(GetPlatformName()));
-    TF_ASSIGN_OR_RETURN(Compiler * compiler,
+    TF_ASSIGN_OR_RETURN(std::unique_ptr<Compiler> compiler,
                         Compiler::GetForPlatform(platform));
 
-    auto* gpu_compiler = static_cast<gpu::GpuCompiler*>(compiler);
+    auto* gpu_compiler = static_cast<gpu::GpuCompiler*>(compiler.get());
+    std::unique_ptr<gpu::GpuAliasInfo> alias_info =
+        gpu_compiler->GetAliasInfo(device_description);
     if (!optimized_module->has_schedule()) {
       TF_ASSIGN_OR_RETURN(gpu::ScheduleMetadata schedule_metadata,
                           gpu::ScheduleGpuModule(optimized_module,
@@ -178,7 +189,7 @@ class GpuOptProvider : public CompiledOptProvider {
                                                  device_description));
       TF_RETURN_IF_ERROR(gpu_compiler->RunPostSchedulingPipelines(
           optimized_module, schedule_metadata.scheduler_mem_limit,
-          device_description));
+          device_description, alias_info.get()));
     }
 
     llvm::LLVMContext llvm_context;
@@ -187,8 +198,7 @@ class GpuOptProvider : public CompiledOptProvider {
         xla::gpu::CompileModuleToLlvmIr(
             optimized_module, &llvm_context, gpu_compiler->GetTargetTriple(),
             gpu_compiler->GetDataLayout(), platform, device_description,
-            gpu_compiler->GetCanShareBuffer(device_description),
-            gpu_compiler->BufferSizeBytesFunction()));
+            alias_info.get(), gpu_compiler->BufferSizeBytesFunction()));
     return llvm_ir::DumpToString(results.llvm_module.get());
   }
 };

@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "xla/hlo/transforms/collectives/infeed_token_propagation.h"
 
+#include <memory>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -23,6 +24,7 @@ limitations under the License.
 #include "xla/hlo/analysis/hlo_ordering.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
+#include "xla/hlo/testlib/verified_hlo_module.h"
 #include "xla/hlo/utils/hlo_matchers.h"
 #include "xla/tsl/platform/statusor.h"
 
@@ -37,7 +39,7 @@ class InfeedTokenPropagationTest : public HloHardwareIndependentTestBase {
 };
 
 TEST_F(InfeedTokenPropagationTest, EntryComputationInfeed) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 ENTRY main {
@@ -46,14 +48,15 @@ ENTRY main {
   ROOT gte.0 = get-tuple-element(infeed.0), index=0
 }
 )";
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_FALSE(changed);
 }
 
 TEST_F(InfeedTokenPropagationTest, EntryComputationOutfeed) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 ENTRY main {
@@ -64,14 +67,15 @@ ENTRY main {
   ROOT tuple.1 = tuple()
 }
 )";
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_FALSE(changed);
 }
 
 TEST_F(InfeedTokenPropagationTest, ConditionalInfeed) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 true_comp {
@@ -93,24 +97,25 @@ ENTRY main {
   ROOT cond.0 = () conditional(pred.0, true_tuple.0, false_tuple.0), true_computation=true_comp, false_computation=false_comp
 }
 )";
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_TRUE(changed);
 
   // The infeed output token should have propagated through the conditional.
   HloInstruction* cond = FindInstruction(module.get(), "cond.0");
-  EXPECT_EQ(cond->shape().tuple_shapes_size(), 1);
+  EXPECT_EQ(cond->shape().tuple_shapes().size(), 1);
   EXPECT_TRUE(cond->shape().tuple_shapes()[0].IsToken());
 
   // The infeed input token should have propagated through the true tuple.
   HloInstruction* true_tuple = FindInstruction(module.get(), "true_tuple.0");
-  EXPECT_EQ(true_tuple->shape().tuple_shapes_size(), 1);
+  EXPECT_EQ(true_tuple->shape().tuple_shapes().size(), 1);
   EXPECT_TRUE(true_tuple->shape().tuple_shapes()[0].IsToken());
 
   // The infeed input token should not have propagated through the false tuple.
   HloInstruction* false_tuple = FindInstruction(module.get(), "false_tuple.0");
-  EXPECT_EQ(false_tuple->shape().tuple_shapes_size(), 0);
+  EXPECT_EQ(false_tuple->shape().tuple_shapes().size(), 0);
 
   // The infeed output token should have propagated through the true
   // computation's root.
@@ -125,7 +130,7 @@ ENTRY main {
 }
 
 TEST_F(InfeedTokenPropagationTest, ConditionalOutfeed) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 true_comp {
@@ -148,24 +153,25 @@ ENTRY main {
   ROOT cond.0 = () conditional(pred.0, true_tuple.0, false_tuple.0), true_computation=true_comp, false_computation=false_comp
 }
 )";
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_TRUE(changed);
 
   // The outfeed output token should have propagated through the conditional.
   HloInstruction* cond = FindInstruction(module.get(), "cond.0");
-  EXPECT_EQ(cond->shape().tuple_shapes_size(), 1);
+  EXPECT_EQ(cond->shape().tuple_shapes().size(), 1);
   EXPECT_TRUE(cond->shape().tuple_shapes()[0].IsToken());
 
   // The outfeed input token should have propagated through the true tuple.
   HloInstruction* true_tuple = FindInstruction(module.get(), "true_tuple.0");
-  EXPECT_EQ(true_tuple->shape().tuple_shapes_size(), 2);
+  EXPECT_EQ(true_tuple->shape().tuple_shapes().size(), 2);
   EXPECT_TRUE(true_tuple->shape().tuple_shapes()[1].IsToken());
 
   // The outfeed input token should not have propagated through the false tuple.
   HloInstruction* false_tuple = FindInstruction(module.get(), "false_tuple.0");
-  EXPECT_EQ(false_tuple->shape().tuple_shapes_size(), 0);
+  EXPECT_EQ(false_tuple->shape().tuple_shapes().size(), 0);
 
   // The outfeed output token should have propagated through the true
   // computation's root.
@@ -179,7 +185,7 @@ ENTRY main {
 }
 
 TEST_F(InfeedTokenPropagationTest, ConditionalDuplicateOperand) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 true_comp {
@@ -200,24 +206,25 @@ ENTRY main {
   ROOT cond.0 = () conditional(pred.0, tuple.0, tuple.0), true_computation=true_comp, false_computation=false_comp
 }
 )";
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_TRUE(changed);
 
   // The infeed output token should have propagated through the conditional.
   HloInstruction* cond = FindInstruction(module.get(), "cond.0");
-  EXPECT_EQ(cond->shape().tuple_shapes_size(), 1);
+  EXPECT_EQ(cond->shape().tuple_shapes().size(), 1);
   EXPECT_TRUE(cond->shape().tuple_shapes()[0].IsToken());
 
   // The infeed input token should have propagated through the true tuple.
   const HloInstruction* true_tuple = cond->operand(1);
-  EXPECT_EQ(true_tuple->shape().tuple_shapes_size(), 1);
+  EXPECT_EQ(true_tuple->shape().tuple_shapes().size(), 1);
   EXPECT_TRUE(true_tuple->shape().tuple_shapes()[0].IsToken());
 
   // The infeed input token should not have propagated through the false tuple.
   const HloInstruction* false_tuple = cond->operand(2);
-  EXPECT_EQ(false_tuple->shape().tuple_shapes_size(), 0);
+  EXPECT_EQ(false_tuple->shape().tuple_shapes().size(), 0);
 
   // The infeed output token should have propagated through the true
   // computation's root.
@@ -232,7 +239,7 @@ ENTRY main {
 }
 
 TEST_F(InfeedTokenPropagationTest, NonTupleConditional) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 true_comp {
@@ -255,25 +262,26 @@ ENTRY main {
   ROOT cond.0 = () conditional(pred.0, arg.0, false_tuple.0), true_computation=true_comp, false_computation=false_comp
 }
 )";
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_TRUE(changed);
 
   // The outfeed output token should have propagated through the conditional.
   HloInstruction* cond = FindInstruction(module.get(), "cond.0");
-  EXPECT_EQ(cond->shape().tuple_shapes_size(), 1);
+  EXPECT_EQ(cond->shape().tuple_shapes().size(), 1);
   EXPECT_TRUE(cond->shape().tuple_shapes()[0].IsToken());
 
   // The outfeed input token should have propagated through the true tuple.
   HloInstruction* true_tuple = cond->mutable_operand(1);
   EXPECT_TRUE(true_tuple->shape().IsTuple());
-  EXPECT_EQ(true_tuple->shape().tuple_shapes_size(), 2);
+  EXPECT_EQ(true_tuple->shape().tuple_shapes().size(), 2);
   EXPECT_TRUE(true_tuple->shape().tuple_shapes()[1].IsToken());
 
   // The outfeed input token should not have propagated through the false tuple.
   HloInstruction* false_tuple = FindInstruction(module.get(), "false_tuple.0");
-  EXPECT_EQ(false_tuple->shape().tuple_shapes_size(), 0);
+  EXPECT_EQ(false_tuple->shape().tuple_shapes().size(), 0);
 
   // The outfeed output token should have propagated through the true
   // computation's root.
@@ -287,7 +295,7 @@ ENTRY main {
 }
 
 TEST_F(InfeedTokenPropagationTest, DisjointConditionalOutfeed) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 true_comp {
@@ -310,24 +318,25 @@ ENTRY main {
   ROOT cond.0 = () conditional(pred.0, true_tuple.0, false_tuple.0), true_computation=true_comp, false_computation=false_comp
 }
 )";
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_TRUE(changed);
 
   // The outfeed output token should have propagated through the conditional.
   HloInstruction* cond = FindInstruction(module.get(), "cond.0");
-  EXPECT_EQ(cond->shape().tuple_shapes_size(), 1);
+  EXPECT_EQ(cond->shape().tuple_shapes().size(), 1);
   EXPECT_TRUE(cond->shape().tuple_shapes()[0].IsToken());
 
   // The outfeed input token should have propagated through the true tuple.
   HloInstruction* true_tuple = FindInstruction(module.get(), "true_tuple.0");
-  EXPECT_EQ(true_tuple->shape().tuple_shapes_size(), 1);
+  EXPECT_EQ(true_tuple->shape().tuple_shapes().size(), 1);
   EXPECT_TRUE(true_tuple->shape().tuple_shapes()[0].IsToken());
 
   // The outfeed input token should not have propagated through the false tuple.
   HloInstruction* false_tuple = FindInstruction(module.get(), "false_tuple.0");
-  EXPECT_EQ(false_tuple->shape().tuple_shapes_size(), 0);
+  EXPECT_EQ(false_tuple->shape().tuple_shapes().size(), 0);
 
   // The outfeed output token should have propagated through the true
   // computation's root.
@@ -341,7 +350,7 @@ ENTRY main {
 }
 
 TEST_F(InfeedTokenPropagationTest, WhileInfeed) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 comp {
@@ -361,19 +370,20 @@ ENTRY main {
   ROOT while.0 = () while(while_tuple.0), condition=cond, body=comp
 }
 )";
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_TRUE(changed);
 
   // The infeed output token should have propagated through the loop.
   HloInstruction* loop = FindInstruction(module.get(), "while.0");
-  EXPECT_EQ(loop->shape().tuple_shapes_size(), 1);
+  EXPECT_EQ(loop->shape().tuple_shapes().size(), 1);
   EXPECT_TRUE(loop->shape().tuple_shapes()[0].IsToken());
 
   // The infeed input token should have propagated through the loop tuple.
   HloInstruction* loop_tuple = FindInstruction(module.get(), "while_tuple.0");
-  EXPECT_EQ(loop_tuple->shape().tuple_shapes_size(), 1);
+  EXPECT_EQ(loop_tuple->shape().tuple_shapes().size(), 1);
   EXPECT_TRUE(loop_tuple->shape().tuple_shapes()[0].IsToken());
 
   // The infeed output token should have propagated through the while body root.
@@ -383,19 +393,19 @@ ENTRY main {
 
   // The infeed input token should have propagated through the body parameter.
   HloInstruction* body_param = body_comp->parameter_instruction(0);
-  EXPECT_EQ(body_param->shape().tuple_shapes_size(), 1);
+  EXPECT_EQ(body_param->shape().tuple_shapes().size(), 1);
   EXPECT_TRUE(body_param->shape().tuple_shapes()[0].IsToken());
 
   // The infeed input token should have propagated through the condition
   // parameter.
   HloComputation* cond_comp = FindComputation(module.get(), "cond");
   HloInstruction* cond_param = cond_comp->parameter_instruction(0);
-  EXPECT_EQ(cond_param->shape().tuple_shapes_size(), 1);
+  EXPECT_EQ(cond_param->shape().tuple_shapes().size(), 1);
   EXPECT_TRUE(cond_param->shape().tuple_shapes()[0].IsToken());
 }
 
 TEST_F(InfeedTokenPropagationTest, WhileOutfeed) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 comp {
@@ -418,19 +428,20 @@ ENTRY main {
 }
 )";
 
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_TRUE(changed);
 
   // The outfeed output token should have propagated through the loop.
   HloInstruction* loop = FindInstruction(module.get(), "while.0");
-  EXPECT_EQ(loop->shape().tuple_shapes_size(), 2);
+  EXPECT_EQ(loop->shape().tuple_shapes().size(), 2);
   EXPECT_TRUE(loop->shape().tuple_shapes()[1].IsToken());
 
   // The outfeed input token should have propagated through the loop tuple.
   HloInstruction* loop_tuple = FindInstruction(module.get(), "while_tuple.0");
-  EXPECT_EQ(loop_tuple->shape().tuple_shapes_size(), 2);
+  EXPECT_EQ(loop_tuple->shape().tuple_shapes().size(), 2);
   EXPECT_TRUE(loop_tuple->shape().tuple_shapes()[1].IsToken());
 
   // The outfeed output token should have propagated through the while body
@@ -441,19 +452,19 @@ ENTRY main {
 
   // The outfeed output token should have propagated through the body parameter.
   HloInstruction* body_param = body_comp->parameter_instruction(0);
-  EXPECT_EQ(body_param->shape().tuple_shapes_size(), 2);
+  EXPECT_EQ(body_param->shape().tuple_shapes().size(), 2);
   EXPECT_TRUE(body_param->shape().tuple_shapes()[1].IsToken());
 
   // The outfeed output token should have propagated through the condition
   // parameter.
   HloComputation* cond_comp = FindComputation(module.get(), "cond");
   HloInstruction* cond_param = cond_comp->parameter_instruction(0);
-  EXPECT_EQ(cond_param->shape().tuple_shapes_size(), 2);
+  EXPECT_EQ(cond_param->shape().tuple_shapes().size(), 2);
   EXPECT_TRUE(cond_param->shape().tuple_shapes()[1].IsToken());
 }
 
 TEST_F(InfeedTokenPropagationTest, DisjointWhileOutfeed) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 comp {
@@ -475,19 +486,20 @@ ENTRY main {
 }
 )";
 
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_TRUE(changed);
 
   // The outfeed output token should have propagated through the loop.
   HloInstruction* loop = FindInstruction(module.get(), "while.0");
-  EXPECT_EQ(loop->shape().tuple_shapes_size(), 1);
+  EXPECT_EQ(loop->shape().tuple_shapes().size(), 1);
   EXPECT_TRUE(loop->shape().tuple_shapes()[0].IsToken());
 
   // The outfeed input token should have propagated through the loop tuple.
   HloInstruction* loop_tuple = FindInstruction(module.get(), "while_tuple.0");
-  EXPECT_EQ(loop_tuple->shape().tuple_shapes_size(), 1);
+  EXPECT_EQ(loop_tuple->shape().tuple_shapes().size(), 1);
   EXPECT_TRUE(loop_tuple->shape().tuple_shapes()[0].IsToken());
 
   // The outfeed output token should have propagated through the while body
@@ -497,19 +509,19 @@ ENTRY main {
 
   // The outfeed output token should have propagated through the body parameter.
   HloInstruction* body_param = body_comp->parameter_instruction(0);
-  EXPECT_EQ(body_param->shape().tuple_shapes_size(), 1);
+  EXPECT_EQ(body_param->shape().tuple_shapes().size(), 1);
   EXPECT_TRUE(body_param->shape().tuple_shapes()[0].IsToken());
 
   // The outfeed output token should have propagated through the condition
   // parameter.
   HloComputation* cond_comp = FindComputation(module.get(), "cond");
   HloInstruction* cond_param = cond_comp->parameter_instruction(0);
-  EXPECT_EQ(cond_param->shape().tuple_shapes_size(), 1);
+  EXPECT_EQ(cond_param->shape().tuple_shapes().size(), 1);
   EXPECT_TRUE(cond_param->shape().tuple_shapes()[0].IsToken());
 }
 
 TEST_F(InfeedTokenPropagationTest, NonTupleWhile) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 comp {
@@ -530,7 +542,8 @@ ENTRY main {
 }
 )";
 
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_TRUE(changed);
@@ -538,7 +551,7 @@ ENTRY main {
   // The outfeed output token should have propagated through the loop.
   HloInstruction* loop = FindInstruction(module.get(), "while.0");
   EXPECT_TRUE(loop->shape().IsTuple());
-  EXPECT_EQ(loop->shape().tuple_shapes_size(), 2);
+  EXPECT_EQ(loop->shape().tuple_shapes().size(), 2);
   EXPECT_TRUE(loop->shape().tuple_shapes()[1].IsToken());
 
   // The outfeed input token should have propagated through the loop tuple.
@@ -552,19 +565,19 @@ ENTRY main {
 
   // The outfeed output token should have propagated through the body parameter.
   HloInstruction* body_param = body_comp->parameter_instruction(0);
-  EXPECT_EQ(body_param->shape().tuple_shapes_size(), 2);
+  EXPECT_EQ(body_param->shape().tuple_shapes().size(), 2);
   EXPECT_TRUE(body_param->shape().tuple_shapes()[1].IsToken());
 
   // The outfeed output token should have propagated through the condition
   // parameter.
   HloComputation* cond_comp = FindComputation(module.get(), "cond");
   HloInstruction* cond_param = cond_comp->parameter_instruction(0);
-  EXPECT_EQ(cond_param->shape().tuple_shapes_size(), 2);
+  EXPECT_EQ(cond_param->shape().tuple_shapes().size(), 2);
   EXPECT_TRUE(cond_param->shape().tuple_shapes()[1].IsToken());
 }
 
 TEST_F(InfeedTokenPropagationTest, NestedInfeedOutfeed) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 true_comp {
@@ -600,7 +613,8 @@ ENTRY main {
   ROOT while.0 = () while(while_tuple.0), condition=cond, body=comp
 }
 )";
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_TRUE(changed);
@@ -608,14 +622,14 @@ ENTRY main {
   // The infeed and outfeed output tokens should have propagated through the
   // loop.
   HloInstruction* loop = FindInstruction(module.get(), "while.0");
-  EXPECT_EQ(loop->shape().tuple_shapes_size(), 2);
+  EXPECT_EQ(loop->shape().tuple_shapes().size(), 2);
   EXPECT_TRUE(loop->shape().tuple_shapes()[0].IsToken());
   EXPECT_TRUE(loop->shape().tuple_shapes()[1].IsToken());
 
   // The infeed and outfeed input tokens should have propagated through the loop
   // tuple.
   HloInstruction* loop_tuple = FindInstruction(module.get(), "while_tuple.0");
-  EXPECT_EQ(loop_tuple->shape().tuple_shapes_size(), 2);
+  EXPECT_EQ(loop_tuple->shape().tuple_shapes().size(), 2);
   EXPECT_TRUE(loop_tuple->shape().tuple_shapes()[0].IsToken());
   EXPECT_TRUE(loop_tuple->shape().tuple_shapes()[1].IsToken());
 
@@ -628,17 +642,17 @@ ENTRY main {
 
   // The outfeed output token should have propagated through the conditional.
   HloInstruction* cond = FindInstruction(module.get(), "cond.0");
-  EXPECT_EQ(cond->shape().tuple_shapes_size(), 1);
+  EXPECT_EQ(cond->shape().tuple_shapes().size(), 1);
   EXPECT_TRUE(cond->shape().tuple_shapes()[0].IsToken());
 
   // The outfeed input token should have propagated through the true tuple.
   HloInstruction* true_tuple = FindInstruction(module.get(), "true_tuple.0");
-  EXPECT_EQ(true_tuple->shape().tuple_shapes_size(), 2);
+  EXPECT_EQ(true_tuple->shape().tuple_shapes().size(), 2);
   EXPECT_TRUE(true_tuple->shape().tuple_shapes()[1].IsToken());
 
   // The outfeed input token should not have propagated through the false tuple.
   HloInstruction* false_tuple = FindInstruction(module.get(), "false_tuple.0");
-  EXPECT_EQ(false_tuple->shape().tuple_shapes_size(), 0);
+  EXPECT_EQ(false_tuple->shape().tuple_shapes().size(), 0);
 
   // The outfeed output token should have propagated through the true
   // computation's root.
@@ -652,7 +666,7 @@ ENTRY main {
 }
 
 TEST_F(InfeedTokenPropagationTest, WhileNestedAfterInfeed) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 body {
@@ -677,7 +691,8 @@ ENTRY main {
   ROOT while.0 = s32[] while(add.0), body=body, condition=cond
 }
 )";
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_TRUE(changed);
@@ -692,7 +707,7 @@ ENTRY main {
 }
 
 TEST_F(InfeedTokenPropagationTest, WhileNestedBeforeOutfeed) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 body {
@@ -714,7 +729,8 @@ ENTRY main {
   outfeed.2 = token[] outfeed(while.0, outfeed.1), outfeed_shape=s32[] 
 }
 )";
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_TRUE(changed);
@@ -729,7 +745,7 @@ ENTRY main {
 }
 
 TEST_F(InfeedTokenPropagationTest, ConditionalNestedAfterInfeed) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 true_comp {
@@ -757,7 +773,8 @@ ENTRY main {
   ROOT cond.0 = (s32[]) conditional(pred.0, tuple.0, tuple.0), true_computation=true_comp, false_computation=false_comp
 }
 )";
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_TRUE(changed);
@@ -779,7 +796,7 @@ ENTRY main {
 }
 
 TEST_F(InfeedTokenPropagationTest, ConditionalNestedBeforeOutfeed) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 true_comp {
@@ -807,7 +824,8 @@ ENTRY main {
   outfeed.3 = token[] outfeed(gte.0, outfeed.2), outfeed_shape=s32[]
 }
 )";
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_TRUE(changed);
@@ -827,7 +845,7 @@ ENTRY main {
 }
 
 TEST_F(InfeedTokenPropagationTest, ConditionalMixedInfeed) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 true_comp {
@@ -851,13 +869,14 @@ ENTRY main {
   ROOT cond.0 = () conditional(pred.0, true_tuple.0, false_tuple.0), true_computation=true_comp, false_computation=false_comp
 }
 )";
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_TRUE(changed);
 
   // The core infeed and host infeed should not be connected.
-  DependencyHloOrdering ordering = DependencyHloOrdering(module.get());
+  DependencyHloOrdering ordering(module.get());
   HloInstruction* core_infeed = FindInstruction(module.get(), "core_infeed.0");
   HloInstruction* host_infeed = FindInstruction(module.get(), "host_infeed.0");
   EXPECT_EQ(ordering.GetExecutionConstraint(core_infeed, host_infeed),
@@ -865,7 +884,7 @@ ENTRY main {
 }
 
 TEST_F(InfeedTokenPropagationTest, ConditionalMixedOutfeed) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 true_comp {
@@ -888,13 +907,14 @@ ENTRY main {
   ROOT cond.0 = () conditional(pred.0, arg.0, arg.0), true_computation=true_comp, false_computation=false_comp
 }
 )";
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_TRUE(changed);
 
   // The core outfeed and host outfeed should not be connected.
-  DependencyHloOrdering ordering = DependencyHloOrdering(module.get());
+  DependencyHloOrdering ordering(module.get());
   HloInstruction* core_outfeed =
       FindInstruction(module.get(), "core_outfeed.0");
   HloInstruction* host_outfeed =
@@ -904,7 +924,7 @@ ENTRY main {
 }
 
 TEST_F(InfeedTokenPropagationTest, WhileMixedInfeed) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 comp {
@@ -926,13 +946,14 @@ ENTRY main {
   ROOT while.0 = () while(while_tuple.0), condition=cond, body=comp
 }
 )";
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_TRUE(changed);
 
   // The core infeed and host infeed should not be connected.
-  DependencyHloOrdering ordering = DependencyHloOrdering(module.get());
+  DependencyHloOrdering ordering(module.get());
   HloInstruction* core_infeed = FindInstruction(module.get(), "core_infeed.0");
   HloInstruction* host_infeed = FindInstruction(module.get(), "host_infeed.0");
   EXPECT_EQ(ordering.GetExecutionConstraint(core_infeed, host_infeed),
@@ -940,7 +961,7 @@ ENTRY main {
 }
 
 TEST_F(InfeedTokenPropagationTest, WhileMixedOutfeed) {
-  constexpr absl::string_view hlo = R"(
+  constexpr absl::string_view kHlo = R"(
 HloModule main
 
 comp {
@@ -965,19 +986,103 @@ ENTRY main {
 }
 )";
 
-  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo));
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
   InfeedTokenPropagation itp;
   TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
   EXPECT_TRUE(changed);
 
   // The core outfeed and host outfeed should not be connected.
-  DependencyHloOrdering ordering = DependencyHloOrdering(module.get());
+  DependencyHloOrdering ordering(module.get());
   HloInstruction* core_outfeed =
       FindInstruction(module.get(), "core_outfeed.0");
   HloInstruction* host_outfeed =
       FindInstruction(module.get(), "host_outfeed.0");
   EXPECT_EQ(ordering.GetExecutionConstraint(core_outfeed, host_outfeed),
             HloOrdering::ExecutionConstraint::kUnordered);
+}
+
+TEST_F(InfeedTokenPropagationTest, ConditionalSharding) {
+  constexpr absl::string_view kHlo = R"(
+HloModule main
+
+true_comp {
+  arg.0 = s32[] parameter(0), sharding={replicated}
+  token.0 = after-all()
+  infeed.0 = token[] outfeed(arg.0, token.0), outfeed_shape=s32[]
+  ROOT tuple.0 = tuple()
+}
+
+false_comp {
+  arg.0 = s32[] parameter(0), sharding={replicated}
+  ROOT tuple.0 = tuple()
+}
+
+ENTRY main {
+  arg.0 = s32[] parameter(0), sharding={replicated}
+  pred.0 = pred[] constant(true)
+  ROOT cond.0 = () conditional(pred.0, arg.0, arg.0), true_computation=true_comp, false_computation=false_comp
+}
+)";
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
+  InfeedTokenPropagation itp;
+  TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
+  EXPECT_TRUE(changed);
+
+  // The parameter should have its original sharding, and sharding for the
+  // appended token.
+  HloComputation* true_comp = FindComputation(module.get(), "true_comp");
+  HloInstruction* true_arg = true_comp->parameter_instruction(0);
+  ASSERT_TRUE(true_arg->has_sharding());
+  EXPECT_TRUE(true_arg->sharding().IsTuple());
+  EXPECT_EQ(true_arg->sharding().tuple_elements().size(), 2);
+  // Token can have arbitrary sharding, so we don't check it.
+  EXPECT_TRUE(true_arg->sharding().tuple_elements()[0].IsReplicated());
+}
+
+TEST_F(InfeedTokenPropagationTest, WhileSharding) {
+  constexpr absl::string_view kHlo = R"(
+HloModule main
+
+body {
+  ROOT arg.0 = s32[] parameter(0), sharding={replicated}
+  token.0 = after-all()
+  outfeed.0 = token[] outfeed(arg.0, token.0), outfeed_shape=s32[]
+}
+
+cond {
+  arg.0 = s32[] parameter(0), sharding={replicated}
+  ROOT true.0 = pred[] constant(true)
+}
+
+ENTRY main {
+  arg.0 = s32[] parameter(0)
+  ROOT while.0 = s32[] while(arg.0), condition=cond, body=body
+}
+)";
+
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
+                          ParseAndReturnVerifiedModule(kHlo));
+  InfeedTokenPropagation itp;
+  TF_ASSERT_OK_AND_ASSIGN(bool changed, itp.Run(module.get()));
+  EXPECT_TRUE(changed);
+
+  // The parameter should have its original sharding, and sharding for the
+  // appended token.
+  HloComputation* body_comp = FindComputation(module.get(), "body");
+  HloInstruction* body_arg = body_comp->parameter_instruction(0);
+  EXPECT_TRUE(body_arg->sharding().IsTuple());
+  EXPECT_EQ(body_arg->sharding().tuple_elements().size(), 2);
+  // Token can have arbitrary sharding, so we don't check it.
+  EXPECT_TRUE(body_arg->sharding().tuple_elements()[0].IsReplicated());
+
+  // All same for condition.
+  HloComputation* cond_comp = FindComputation(module.get(), "cond");
+  HloInstruction* cond_arg = cond_comp->parameter_instruction(0);
+  EXPECT_TRUE(cond_arg->sharding().IsTuple());
+  EXPECT_EQ(cond_arg->sharding().tuple_elements().size(), 2);
+  EXPECT_TRUE(cond_arg->sharding().tuple_elements()[0].IsReplicated());
 }
 }  // namespace
 }  // namespace xla

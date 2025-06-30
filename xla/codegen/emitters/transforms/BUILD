@@ -1,4 +1,6 @@
 load("@llvm-project//mlir:tblgen.bzl", "gentbl_cc_library")
+load("//xla/tsl:tsl.default.bzl", "get_compatible_with_portable")
+load("//xla/tsl/platform:rules_cc.bzl", "cc_library")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -29,15 +31,11 @@ cc_library(
 
 gentbl_cc_library(
     name = "passes_inc_gen",
-    tbl_outs = [
-        (
-            [
-                "-gen-pass-decls",
-                "-name=Transforms",
-            ],
-            "passes.h.inc",
-        ),
-    ],
+    compatible_with = get_compatible_with_portable(),
+    tbl_outs = {"passes.h.inc": [
+        "-gen-pass-decls",
+        "-name=Transforms",
+    ]},
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "passes.td",
     visibility = ["//visibility:private"],
@@ -47,23 +45,26 @@ gentbl_cc_library(
 cc_library(
     name = "passes",
     srcs = [
-        "convert_pure_call_ops.cc",
         "erase_dead_functions.cc",
         "expand_float_ops.cc",
         "flatten_tensors.cc",
         "lower_tensors.cc",
         "lower_to_llvm.cc",
+        "lower_xla_math_lib.cc",
         "lower_xla_to_scf.cc",
         "merge_pointers_to_same_slice.cc",
         "propagate_slice_indices.cc",
-        "simplify_affine.cc",
-        "simplify_arith.cc",
         "unswitch_loops.cc",
+        "vectorize_loads_stores.cc",
     ],
     hdrs = ["passes.h"],
     deps = [
         ":atomic_rmw_utils",
+        ":convert_pure_call_ops_pass",
         ":passes_inc_gen",
+        ":propagate_alias_scopes",
+        ":simplify_affine_pass",
+        ":simplify_arith_pass",
         "//xla:shape_util",
         "//xla:util",
         "//xla:xla_data_proto_cc",
@@ -71,6 +72,7 @@ cc_library(
         "//xla/backends/gpu/codegen/emitters/ir:xla_gpu",
         "//xla/codegen:device_spec",
         "//xla/codegen/emitters:elemental_hlo_to_mlir",
+        "//xla/codegen/emitters:implicit_arith_op_builder",
         "//xla/codegen/emitters/ir:xla",
         "//xla/hlo/analysis:indexing_analysis",
         "//xla/mlir_hlo",
@@ -80,15 +82,13 @@ cc_library(
         "//xla/stream_executor:device_description_proto_cc",
         "//xla/tsl/platform:logging",
         "@com_google_absl//absl/algorithm:container",
-        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:Support",
-        "@llvm-project//mlir:AffineDialect",
+        "@llvm-project//mlir:AMDGPUUtils",
         "@llvm-project//mlir:AffineToStandard",
-        "@llvm-project//mlir:AffineUtils",
         "@llvm-project//mlir:ArithDialect",
         "@llvm-project//mlir:ArithToLLVM",
         "@llvm-project//mlir:ArithTransforms",
@@ -97,6 +97,7 @@ cc_library(
         "@llvm-project//mlir:ComplexToLLVM",
         "@llvm-project//mlir:ControlFlowToLLVM",
         "@llvm-project//mlir:DataLayoutInterfaces",
+        "@llvm-project//mlir:DialectUtils",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:FuncToLLVM",
         "@llvm-project//mlir:GPUDialect",
@@ -121,5 +122,90 @@ cc_library(
         "@llvm-project//mlir:VectorToLLVM",
         "@llvm-project//mlir:VectorTransforms",
         "@tsl//tsl/platform:protobuf",
+    ],
+)
+
+cc_library(
+    name = "convert_pure_call_ops_pass",
+    srcs = [
+        "convert_pure_call_ops.cc",
+    ],
+    hdrs = ["passes.h"],
+    deps = [
+        ":passes_inc_gen",
+        "//xla/codegen/emitters/ir:xla",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:Support",
+        "@llvm-project//mlir:TransformUtils",
+    ],
+)
+
+cc_library(
+    name = "simplify_affine_pass",
+    srcs = [
+        "simplify_affine.cc",
+    ],
+    hdrs = ["passes.h"],
+    deps = [
+        ":passes_inc_gen",
+        "//xla/codegen/emitters/ir:xla",
+        "//xla/hlo/analysis:indexing_analysis",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/log:check",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:AffineDialect",
+        "@llvm-project//mlir:AffineUtils",
+        "@llvm-project//mlir:ArithDialect",
+        "@llvm-project//mlir:DataLayoutInterfaces",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:SCFDialect",
+        "@llvm-project//mlir:Support",
+        "@llvm-project//mlir:TransformUtils",
+    ],
+)
+
+cc_library(
+    name = "simplify_arith_pass",
+    srcs = [
+        "simplify_arith.cc",
+    ],
+    hdrs = ["passes.h"],
+    deps = [
+        ":passes_inc_gen",
+        "//xla/codegen/emitters/ir:xla",
+        "//xla/hlo/analysis:indexing_analysis",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:ArithDialect",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:GPUDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:SCFDialect",
+        "@llvm-project//mlir:Support",
+        "@llvm-project//mlir:TransformUtils",
+    ],
+)
+
+cc_library(
+    name = "propagate_alias_scopes",
+    srcs = ["propagate_alias_scopes.cc"],
+    deps = [
+        ":passes_inc_gen",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/strings",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:CallOpInterfaces",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:LLVMDialect",
+        "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:SCFDialect",
+        "@llvm-project//mlir:Support",
+        "@llvm-project//mlir:TensorDialect",
     ],
 )

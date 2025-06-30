@@ -46,6 +46,13 @@ enum {
   // AssembleArrayFromSingleDeviceArrays to support non-addressable arrays.
   kAssembleArrayFromSingleDeviceArraysWithDType,
 
+  // kMakeArraysFromHostBufferShards adds Client::MakeArraysFromHostBufferShards
+  // support.
+  kMakeArraysFromHostBufferShards,
+
+  // kSerDesVersioning users IFRT SerDes versioning for IFRT types.
+  kSerDesVersioning,
+
   // kSentiel is used to derive kCurrent below. Keep this as the last value of
   // the enum.
   kSentiel,

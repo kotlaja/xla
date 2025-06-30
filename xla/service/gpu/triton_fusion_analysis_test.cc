@@ -20,13 +20,14 @@ limitations under the License.
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_opcode.h"
+#include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
 #include "xla/hlo/testlib/verified_hlo_module.h"
 #include "xla/service/gpu/transforms/gemm_fusion.h"
 #include "xla/stream_executor/device_description.h"
-#include "xla/tests/hlo_test_base.h"
 #include "xla/tsl/platform/status_matchers.h"
 #include "xla/tsl/platform/statusor.h"
 #include "tsl/platform/status_matchers.h"
@@ -39,7 +40,7 @@ namespace {
 using ::testing::ElementsAre;
 using ::testing::FieldsAre;
 
-using TritonDotAnalysisTest = HloTestBase;
+using TritonDotAnalysisTest = HloHardwareIndependentTestBase;
 
 TEST_F(TritonDotAnalysisTest, QueryingOutputScopeParametersAlwaysWorks) {
   TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<VerifiedHloModule> module,
@@ -697,7 +698,7 @@ ENTRY e {
   ROOT bc = bf16[2,2,100] broadcast(dot), dimensions={0,1}
 })"));
   EXPECT_TRUE(GemmFusion(se::CudaComputeCapability{
-                             se::CudaComputeCapability::AMPERE, 0})
+                             se::CudaComputeCapability::kAmpere, 0})
                   .Run(module.get())
                   .value());
   EXPECT_EQ(module->entry_computation()->root_instruction()->opcode(),

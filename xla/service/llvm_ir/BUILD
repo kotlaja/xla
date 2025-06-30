@@ -1,7 +1,7 @@
 # Description:
 #    Libraries for helping construct LLVM IR for XLA backends.
 
-load("//xla:xla.bzl", "xla_cc_test")
+load("//xla:xla.default.bzl", "xla_cc_test")
 load("//xla/tsl:tsl.bzl", "internal_visibility")
 load("//xla/tsl:tsl.default.bzl", "filegroup")
 load("//xla/tsl/platform:rules_cc.bzl", "cc_library")
@@ -49,21 +49,6 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/strings",
         "@llvm-project//llvm:Core",
-    ],
-)
-
-xla_cc_test(
-    name = "alias_analysis_test",
-    srcs = ["alias_analysis_test.cc"],
-    deps = [
-        "//xla:xla_proto_cc",
-        "//xla/ffi",
-        "//xla/ffi:ffi_api",
-        "//xla/service/cpu/tests:cpu_codegen_test_main",
-        "//xla/tests:hlo_test_base",
-        "//xla/tsl/platform:test",
-        "@com_google_absl//absl/status",
-        "@com_google_googletest//:gtest",
     ],
 )
 
@@ -227,7 +212,6 @@ cc_library(
         "//xla:shape_util",
         "//xla/hlo/ir:hlo",
         "//xla/service:buffer_assignment",
-        "//xla/service:elemental_ir_emitter",
         "//xla/service/cpu:backend_config_proto_cc",
         "//xla/service/gpu:launch_dimensions",
         "//xla/service/gpu:parallel_loop_emitter",

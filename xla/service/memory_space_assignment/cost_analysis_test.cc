@@ -23,11 +23,11 @@ limitations under the License.
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
 #include "xla/hlo/ir/hlo_instruction.h"
+#include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
 #include "xla/service/cost_modelling/op_cost.h"
 #include "xla/service/hlo_cost_analysis.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
-#include "xla/tests/hlo_test_base.h"
 #include "xla/tsl/lib/core/status_test_util.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/statusor.h"
@@ -38,12 +38,14 @@ namespace {
 using memory_space_assignment::CostAnalysis;
 using memory_space_assignment::CostAnalysisOptions;
 
-class MemorySpaceAssignmentCostAnalysisTest : public HloTestBase {
+class MemorySpaceAssignmentCostAnalysisTest
+    : public HloHardwareIndependentTestBase {
  protected:
   absl::Status Initialize(const HloModule* module,
                           float pipeline_overhead_window_size_mib = 0.0) {
     HloCostAnalysis::Options options;
-    options_.alternate_mem_bandwidth_bytes_per_second = 128;
+    options_.alternate_mem_read_bandwidth_bytes_per_second = 128;
+    options_.alternate_mem_write_bandwidth_bytes_per_second = 128;
     options_.default_mem_bandwidth_bytes_per_second = 32;
     options_.pipeline_overhead_window_size_mib =
         pipeline_overhead_window_size_mib;

@@ -24,7 +24,6 @@ limitations under the License.
 #include <vector>
 
 #include "absl/container/inlined_vector.h"
-#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
 #include "nanobind/nanobind.h"
@@ -32,6 +31,7 @@ limitations under the License.
 #include "xla/literal.h"
 #include "xla/python/ifrt/dtype.h"
 #include "xla/python/nb_numpy.h"
+#include "xla/python/version.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/xla_data.pb.h"
@@ -47,7 +47,8 @@ absl::StatusOr<nb_dtype> PrimitiveTypeToNbDtype(PrimitiveType type);
 // Converts an IFRT dtype to a NumPy dtype.
 absl::StatusOr<nb_dtype> IfrtDtypeToNbDtype(ifrt::DType dtype);
 
-absl::StatusOr<ifrt::DType> DtypeToIfRtDType(nb_dtype dtype);
+// Converts a NumPy dtype to an IFRT dtype.
+absl::StatusOr<ifrt::DType> DtypeToIfRtDType(const nb_dtype& dtype);
 
 // Converts an IFRT dtype to a NumPy dtype. It specially converts `kToken` into
 // bool to avoid exposing the token type to the JAX dtype system, expecting JAX
@@ -65,31 +66,28 @@ absl::StatusOr<nanobind::str> TypeDescriptorForPrimitiveType(
 
 struct NumpyScalarTypes {
   nanobind::object np_bool;
-  // Remove std::optional once the minimum ml_dtypes in JAX is >= 0.4.1.
-  std::optional<nanobind::object> np_int2;
+  nanobind::object np_int2;
   nanobind::object np_int4;
   nanobind::object np_int8;
   nanobind::object np_int16;
   nanobind::object np_int32;
   nanobind::object np_int64;
-  // Remove std::optional once the minimum ml_dtypes in JAX is >= 0.4.1.
-  std::optional<nanobind::object> np_uint2;
+  nanobind::object np_uint2;
   nanobind::object np_uint4;
   nanobind::object np_uint8;
   nanobind::object np_uint16;
   nanobind::object np_uint32;
   nanobind::object np_uint64;
   nanobind::object np_bfloat16;
-  // Remove std::optional once the minimum ml_dtypes in JAX is >= 0.5.0.
-  std::optional<nanobind::object> np_float4_e2m1fn;
-  std::optional<nanobind::object> np_float8_e3m4;
-  std::optional<nanobind::object> np_float8_e4m3;
+  nanobind::object np_float4_e2m1fn;
+  nanobind::object np_float8_e3m4;
+  nanobind::object np_float8_e4m3;
   nanobind::object np_float8_e4m3fn;
   nanobind::object np_float8_e4m3b11fnuz;
   nanobind::object np_float8_e4m3fnuz;
   nanobind::object np_float8_e5m2;
   nanobind::object np_float8_e5m2fnuz;
-  std::optional<nanobind::object> np_float8_e8m0fnu;
+  nanobind::object np_float8_e8m0fnu;
   nanobind::object np_float16;
   nanobind::object np_float32;
   nanobind::object np_float64;

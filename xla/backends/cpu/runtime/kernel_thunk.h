@@ -38,8 +38,8 @@ limitations under the License.
 #include "xla/backends/cpu/runtime/kernel_c_api.h"
 #include "xla/backends/cpu/runtime/thunk.h"
 #include "xla/codegen/kernel_spec.h"
+#include "xla/runtime/work_group.h"
 #include "xla/service/buffer_assignment.h"
-#include "xla/stream_executor/launch_dim.h"
 #include "xla/tsl/concurrency/async_value_ref.h"
 
 namespace xla::cpu {
@@ -55,14 +55,17 @@ class KernelThunkBase : public Thunk {
   virtual ~KernelThunkBase() = default;  // NOLINT: clang-tidy complains that
                                          // `override` should be used here.
   KernelThunkBase(Kind kind, Info info) : Thunk(kind, std::move(info)) {}
+
   virtual absl::string_view kernel_name() const = 0;
-  virtual const se::ThreadDim& thread_dim() const = 0;
+  virtual const NumWorkGroups& num_workgroups() const = 0;
   virtual const std::optional<uint64_t>& min_alignment() const = 0;
 
   virtual absl::Span<const BufferAllocation::Slice> arguments_buffers()
       const = 0;
 
   virtual absl::Span<const BufferAllocation::Slice> results_buffers() const = 0;
+
+  virtual const absl::flat_hash_set<int64_t>& invariant_arguments() const = 0;
 };
 
 namespace internal {
@@ -82,7 +85,7 @@ class KernelThunk : public KernelThunkBase {
   BufferUses buffer_uses() const final;
 
   absl::string_view kernel_name() const final { return kernel_name_; }
-  const se::ThreadDim& thread_dim() const final { return thread_dim_; }
+  const NumWorkGroups& num_workgroups() const final { return num_workgroups_; }
   const std::optional<uint64_t>& min_alignment() const final {
     return min_alignment_;
   }
@@ -93,6 +96,10 @@ class KernelThunk : public KernelThunkBase {
 
   absl::Span<const BufferAllocation::Slice> results_buffers() const final {
     return absl::MakeSpan(results_buffers_);
+  }
+
+  const absl::flat_hash_set<int64_t>& invariant_arguments() const final {
+    return invariant_arguments_;
   }
 
  protected:
@@ -129,8 +136,8 @@ class KernelThunk : public KernelThunkBase {
   KernelThunk(Info info,
               absl::Span<const BufferAllocation::Slice> arguments_buffers,
               absl::Span<const BufferAllocation::Slice> results_buffers,
-              std::optional<absl::flat_hash_set<int64_t>> invariant_arguments,
-              std::string kernel_name, se::ThreadDim thread_dim,
+              absl::flat_hash_set<int64_t> invariant_arguments,
+              std::string kernel_name, NumWorkGroups num_workgroups,
               std::optional<uint64_t> min_alignment);
 
   absl::Status CheckInvariantBuffersMemory(const KernelArgs& kernel_args) const;
@@ -139,17 +146,17 @@ class KernelThunk : public KernelThunkBase {
   ResultsBuffers results_buffers_;
 
   // A set of invariant arguments (their indices).
-  std::optional<absl::flat_hash_set<int64_t>> invariant_arguments_;
+  absl::flat_hash_set<int64_t> invariant_arguments_;
 
   size_t num_kernel_args_;
 
   std::string kernel_name_;
-  se::ThreadDim thread_dim_;
+  NumWorkGroups num_workgroups_;
   std::optional<uint64_t> min_alignment_;
 
-  // If `true`, host kernel will be called just once for a logical thread dim
-  // (1,1,1). This is a fast path for small host kernels that have just one
-  // logical thread dim.
+  // If `true`, host kernel will be called just once for a workgroup id
+  // (0, 0, 0). This is a fast path for small host kernels that have just one
+  // workgroup.
   bool call_once_;
 
   // Lazily loaded host kernel corresponding to `kernel_name_`.
@@ -157,8 +164,9 @@ class KernelThunk : public KernelThunkBase {
   absl::StatusOr<Kernel> kernel_;
 
   // Pre-initialized kernel arguments that are updated with memory addresses
-  // before the kernel launch.
-  KernelArgs kernel_args_;
+  // before the kernel launch. Align `KernelArgs` to 64 bytes to allow aligned
+  // moves on a hot path.
+  alignas(64) KernelArgs kernel_args_;
 };
 
 }  // namespace internal
@@ -188,8 +196,8 @@ class KernelThunk final : public internal::KernelThunk<> {
       Thunk::Info info,
       absl::Span<const BufferAllocation::Slice> arguments_buffers,
       absl::Span<const BufferAllocation::Slice> results_buffers,
-      std::string kernel_name, se::ThreadDim thread_dim,
-      std::optional<absl::flat_hash_set<int64_t>> invariant_arguments,
+      std::string kernel_name, NumWorkGroups num_workgroups,
+      absl::flat_hash_set<int64_t> invariant_arguments,
       std::optional<uint64_t> min_alignment = std::nullopt);
 
   static absl::StatusOr<std::unique_ptr<Thunk>> Create(

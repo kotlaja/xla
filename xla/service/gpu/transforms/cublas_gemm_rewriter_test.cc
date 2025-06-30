@@ -16,6 +16,7 @@ limitations under the License.
 #include <memory>
 #include <optional>
 #include <tuple>
+#include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_replace.h"
@@ -32,6 +33,7 @@ limitations under the License.
 #include "xla/stream_executor/device_description.h"
 #include "xla/stream_executor/semantic_version.h"
 #include "xla/xla.pb.h"
+#include "xla/xla_data.pb.h"
 #include "tsl/platform/statusor.h"
 
 namespace xla {
@@ -66,7 +68,7 @@ ENTRY e {
   RunAndFilecheckHloRewrite(
       hlo_text,
       GemmRewriter(
-          se::CudaComputeCapability{se::CudaComputeCapability::AMPERE, 0},
+          se::CudaComputeCapability{se::CudaComputeCapability::kAmpere, 0},
           /*toolkit_version=*/stream_executor::SemanticVersion{12, 4, 0}),
       R"(
 ; CHECK:  %[[P0:.+]] = f32[2048]{0} parameter(0)
@@ -90,7 +92,7 @@ ENTRY e {
   RunAndFilecheckHloRewrite(
       hlo_text,
       GemmRewriter(
-          se::CudaComputeCapability{se::CudaComputeCapability::AMPERE, 0},
+          se::CudaComputeCapability{se::CudaComputeCapability::kAmpere, 0},
           /*toolkit_version=*/stream_executor::SemanticVersion{12, 4, 0}),
       R"(
 ; CHECK:  %[[P0:.+]] = f32[10,10,2048]{2,1,0} parameter(0)
@@ -111,7 +113,7 @@ ENTRY main {
       lhs_contracting_dims={1}, rhs_contracting_dims={0}, sparsity=L.1@2:4
 })";
   auto hlo_pass = GemmRewriter(
-      se::CudaComputeCapability{se::CudaComputeCapability::AMPERE, 0},
+      se::CudaComputeCapability{se::CudaComputeCapability::kAmpere, 0},
       /*toolkit_version=*/stream_executor::SemanticVersion{12, 4, 0});
   TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnVerifiedModule(hlo_text));
   TF_ASSERT_OK_AND_ASSIGN(bool changed, RunHloPass(&hlo_pass, module.get()));
@@ -2165,6 +2167,59 @@ ENTRY test {
       )");
 }
 
+TEST_F(CublasLtGemmRewriteTest, MatrixBiasSwishActivation) {
+  auto runtime_version = GetRuntimeVersion();
+  bool rocm_gelu_available =
+      IsRocm() &&
+      (runtime_version >= stream_executor::SemanticVersion(7, 0, 0));
+  if (!rocm_gelu_available) {
+    GTEST_SKIP() << "TODO: Unsupported blas-lt epilogue on ROCM";
+  }
+  const char* hlo_text = R"(
+HloModule test
+
+ENTRY test {
+  x = f32[2,3] parameter(0)
+  y = f32[3,4] parameter(1)
+  dot = f32[2,4] dot(x, y), lhs_contracting_dims={1}, rhs_contracting_dims={0}
+  neg = f32[2,4] negate(dot) 
+  exp = f32[2,4] exponential(neg)
+  one = f32[] constant(1)
+  one_bcast = f32[2,4] broadcast(one), dimensions={}
+  denom = f32[2,4] add(one_bcast, exp)
+  sigmoid = f32[2,4] divide(one_bcast, denom)
+  ROOT swish = f32[2,4] multiply(dot, sigmoid)
+}
+
+)";
+
+  EXPECT_TRUE(RunAndCompare(hlo_text, ErrorSpec{1e-3, 1e-3}));
+  MatchOptimizedHlo(hlo_text,
+                    R"(
+
+; CHECK-LABEL: ENTRY %test ({{.*}}: f32[2,3], {{.*}}: f32[3,4]) -> f32[2,4] {
+; CHECK-NEXT:    [[P0:%[^ ]+]] = f32[2,3]{1,0} parameter(0)
+; CHECK-NEXT:    [[P1:%[^ ]+]] = f32[3,4]{1,0} parameter(1)
+; CHECK-NEXT:    [[OUT:%[^ ]+]] = (f32[2,4]{1,0}, s8[{{[0-9]+}}]{0}) custom-call([[P0]], [[P1]]),
+; CHECK:           custom_call_target="__cublas$lt$matmul",
+; CHECK:           backend_config={
+; CHECK-DAG:         "alpha_real":1
+; CHECK-DAG:         "alpha_imag":0
+; CHECK-DAG:         "beta":0
+; CHECK-DAG:         "dot_dimension_numbers":{
+; CHECK-DAG:           "lhs_contracting_dimensions":["1"]
+; CHECK-DAG:           "rhs_contracting_dimensions":["0"]
+; CHECK-DAG:           "lhs_batch_dimensions":[]
+; CHECK-DAG:           "rhs_batch_dimensions":[]
+; CHECK-DAG:         }
+; CHECK-DAG:         "precision_config":{
+; CHECK-DAG:           "operand_precision":["DEFAULT","DEFAULT"]
+; CHECK-DAG:         }
+; CHECK-DAG:         "epilogue":"SILU"
+; CHECK:           }
+      )");
+}
+
 TEST_F(CublasLtGemmRewriteTest, VectorBiasThenApproxGeluActivation) {
   auto runtime_version = GetRuntimeVersion();
   bool rocm_gelu_available =
@@ -3331,6 +3386,39 @@ ENTRY test {
 ; CHECK:        %[[custom_call:.*]] = {{.*}} custom-call{{.*}}__cublas$lt$matmul
 ; CHECK:        %[[tuple:.*]] = bf16[16,16]{1,0} get-tuple-element(%[[custom_call]]), index=0
 ; CHECK:        ROOT {{.*}} fusion({{.*}}%[[tuple]]
+)");
+}
+
+TEST_F(CublasLtGemmRewriteTest, CublasLtFullyContractingRhsWithBias) {
+  const char* hlo_text = R"(
+HloModule test
+
+ENTRY test {
+  param_0 = bf16[10240,1024]{1,0} parameter(0)
+  param_1 = bf16[1024,1]{1,0} parameter(1)
+  dot = bf16[10240,1]{1,0} dot(param_0, param_1), lhs_contracting_dims={1}, rhs_contracting_dims={0}
+  transpose = bf16[10240,1]{1,0} transpose(dot), dimensions={0,1}
+  param_2 = bf16[1]{0} parameter(2)
+  reshape = bf16[1]{0} reshape(param_2)
+  broadcast = bf16[10240,1]{1,0} broadcast(reshape), dimensions={1}
+  ROOT out = bf16[10240,1]{1,0} add(transpose, broadcast)
+}
+)";
+
+  EXPECT_TRUE(RunAndCompare(hlo_text, ErrorSpec{1e-2, 1e-2}));
+
+  if (IsCuda() &&
+      !HasCudaComputeCapability(se::CudaComputeCapability::Ampere())) {
+    GTEST_SKIP() << "Pre-Ampere casts up bf16 to fp32";
+  }
+
+  MatchOptimizedHlo(hlo_text, R"(
+; CHECK-DAG: [[LHS:%[^ ]+]] = bf16[10240,1024]{1,0} parameter(0)
+; CHECK-DAG: [[P_1:%[^ ]+]] = bf16[1024,1]{1,0} parameter(1)
+; CHECK-DAG: [[P_2:%[^ ]+]] = bf16[1]{0} parameter(2)
+; CHECK-DAG: [[RHS:%[^ ]+]] = bf16[1024]{0} {{.+}}([[P_1]])
+; CHECK-DAG: [[BIAS:%[^ ]+]] = bf16[] {{.+}}([[P_2]])
+; CHECK: custom-call([[LHS]], [[RHS]], [[BIAS]]), custom_call_target="__cublas$lt$matmul"
 )");
 }
 

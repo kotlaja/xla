@@ -46,7 +46,7 @@ absl::Status SerializeHloUnoptimizedSnapshot(
   for (const auto& partition : snapshot.partitions()) {
     HloInputs* partition_metadata = metadata_proto.add_partitions();
     for (const auto& argument : partition.arguments()) {
-      auto shape = xla::Shape(argument.shape());
+      TF_ASSIGN_OR_RETURN(auto shape, Shape::FromProto(argument.shape()));
       TF_ASSIGN_OR_RETURN(int64_t serialized_size,
                           ShapeUtil::SerializedSize(shape));
       partition_metadata->add_arguments_descriptors()->set_argument_size_bytes(
@@ -73,14 +73,16 @@ absl::Status SerializeHloUnoptimizedSnapshot(
 
 absl::StatusOr<HloUnoptimizedSnapshot> DeserializeHloUnoptimizedSnapshot(
     tsl::protobuf::io::ZeroCopyInputStream* zero_copy_input_stream) {
-  tsl::protobuf::io::CodedInputStream input_stream(zero_copy_input_stream);
-
-  // Deserialize metadata
   HloUnoptimizedSnapshot metadata;
-  if (!tsl::protobuf::util::ParseDelimitedFromCodedStream(
-          &metadata, &input_stream,
-          /*clean_eof=*/nullptr)) {
-    return absl::InternalError("Failed to deserialize metadata");
+  {
+    tsl::protobuf::io::CodedInputStream input_stream(zero_copy_input_stream);
+
+    // Deserialize metadata
+    if (!tsl::protobuf::util::ParseDelimitedFromCodedStream(
+            &metadata, &input_stream,
+            /*clean_eof=*/nullptr)) {
+      return absl::InternalError("Failed to deserialize metadata");
+    }
   }
 
   HloUnoptimizedSnapshot snapshot_with_args;
@@ -97,6 +99,8 @@ absl::StatusOr<HloUnoptimizedSnapshot> DeserializeHloUnoptimizedSnapshot(
   for (const auto& partition : metadata.partitions()) {
     HloInputs* partition_metadata = snapshot_with_args.add_partitions();
     for (const auto& descriptor : partition.arguments_descriptors()) {
+      tsl::protobuf::io::CodedInputStream input_stream(zero_copy_input_stream);
+
       if (descriptor.version() > kMaxSupportedLiteralVersion) {
         return absl::InternalError(absl::StrCat(
             "Unsupported argument descriptor version: ", descriptor.version()));
@@ -115,6 +119,7 @@ absl::StatusOr<HloUnoptimizedSnapshot> DeserializeHloUnoptimizedSnapshot(
           literal_or_status.value().ToProto();
     }
   }
+  tsl::protobuf::io::CodedInputStream input_stream(zero_copy_input_stream);
   if (input_stream.BytesUntilTotalBytesLimit() > 0) {
     return absl::InternalError("Unexpected extra data in the stream");
   }

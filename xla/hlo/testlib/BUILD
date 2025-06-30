@@ -5,7 +5,6 @@ load(
     "@local_config_rocm//rocm:build_defs.bzl",
     "if_rocm_is_configured",
 )
-load("//xla:package_groups.bzl", "xla_tests_package_groups")
 load("//xla/tsl:tsl.bzl", "internal_visibility")
 load("//xla/tsl:tsl.default.bzl", "filegroup")
 load("//xla/tsl/platform:rules_cc.bzl", "cc_library")
@@ -16,7 +15,7 @@ load(
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
-    default_visibility = internal_visibility([":friends"]),
+    default_visibility = internal_visibility(["//xla/tests:friends"]),
     licenses = ["notice"],
 )
 
@@ -28,8 +27,6 @@ filegroup(
         "**/*.h",
     ]),
 )
-
-xla_tests_package_groups()
 
 cc_library(
     name = "verified_hlo_module",
@@ -69,9 +66,11 @@ cc_library(
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/ir:hlo_module_group",
+        "//xla/hlo/parser:hlo_parser",
         "//xla/hlo/pass:hlo_pass",
         "//xla/hlo/utils:hlo_query",
         "//xla/service:computation_layout",
+        "//xla/service:computation_placer_hdr",
         "//xla/service:hlo_module_config",
         "//xla/service:hlo_verifier",
         "//xla/tsl/platform:errors",
@@ -87,6 +86,7 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
     ],
 )
@@ -107,6 +107,7 @@ cc_library(
         "//xla/tsl/platform:resource_loader",
         "//xla/tsl/platform:subprocess",
         "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
         "@tsl//tsl/platform",
@@ -119,7 +120,6 @@ cc_library(
     testonly = 1,
     hdrs = ["pattern_matcher_gmock.h"],
     deps = [
-        "test",
         "//xla:shape_util",
         "//xla/hlo/ir:hlo",
         "//xla/service:pattern_matcher",
@@ -131,10 +131,10 @@ cc_library(
     name = "test",
     testonly = 1,
     hdrs = ["test.h"],
-    visibility = internal_visibility([":friends"]),
+    visibility = internal_visibility(["//xla/tests:friends"]),
     deps = [
         "//xla/tsl/platform:test",
-        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_for_library",
         "@tsl//tsl/platform",
     ],
 )
@@ -143,7 +143,7 @@ cc_library(
     name = "test_helpers",
     testonly = 1,
     hdrs = ["test_helpers.h"],
-    visibility = internal_visibility([":friends"]),
+    visibility = internal_visibility(["//xla/tests:friends"]),
     deps = [
         "//xla/tsl/platform:test",
         "@com_google_absl//absl/status",

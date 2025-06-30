@@ -22,7 +22,6 @@ limitations under the License.
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -1111,6 +1110,13 @@ struct CtxBinding<TestStream> {
 TEST(FfiTest, PlatformStream) {
   // We only check that it compiles.
   (void)Ffi::BindTo(+[](TestStream stream) { return absl::OkStatus(); });
+}
+
+TEST(FfiTest, BindFfiInternals) {
+  (void)Ffi::Bind().Ctx<FfiApi>().Ctx<FfiExecutionContext>().To(
+      +[](const XLA_FFI_Api* api, XLA_FFI_ExecutionContext* ctx) {
+        return absl::OkStatus();
+      });
 }
 
 //===----------------------------------------------------------------------===//

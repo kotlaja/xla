@@ -1,4 +1,4 @@
-load("@xla//xla/tsl:tsl.bzl", "if_not_android", "if_oss", "internal_visibility", "nvtx_headers")
+load("@xla//xla/tsl:tsl.bzl", "if_not_android", "internal_visibility", "nvtx_headers")
 load("@xla//xla/tsl:tsl.default.bzl", "filegroup", "get_compatible_with_portable")
 load("@xla//xla/tsl/platform:build_config.bzl", "tsl_cc_test")
 load("@xla//xla/tsl/platform:build_config_root.bzl", "if_static")
@@ -99,10 +99,11 @@ cc_library(
         "//learning/brain/tfrc/executor/stream_executor:__pkg__",
     ]),
     deps = [
+        ":profiler_controller",
         ":profiler_interface",
-        "//tsl/platform:mutex",
-        "//tsl/profiler/lib:profiler_controller",
         "//tsl/profiler/protobuf:profiler_options_proto_cc",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/synchronization",
     ],
     alwayslink = True,
 )
@@ -172,14 +173,17 @@ tsl_cc_test(
 cc_library(
     name = "profiler_session",
     hdrs = ["profiler_session.h"],
-    visibility = internal_visibility(["@xla//xla/tsl:internal"]),
+    visibility = internal_visibility([
+        "@xla//xla/tsl:internal",
+        "//third_party/py/jax:__subpackages__",
+    ]),
     deps = [
         "//tsl/platform",
-        "//tsl/platform:mutex",
         "//tsl/platform:thread_annotations",
         "//tsl/profiler/protobuf:profiler_options_proto_cc",
         "//tsl/profiler/protobuf:xplane_proto_cc",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/synchronization",
         "@xla//xla/tsl/platform:errors",
         "@xla//xla/tsl/platform:status",
         "@xla//xla/tsl/platform:types",
@@ -203,12 +207,12 @@ cc_library(
         "@xla//xla/tsl/profiler:internal",
     ]),
     deps = [
-        "//tsl/platform:mutex",
         "//tsl/platform:thread_annotations",
         "//tsl/profiler/protobuf:profiler_options_proto_cc",
         "//tsl/profiler/protobuf:xplane_proto_cc",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/synchronization",
         "@xla//xla/tsl/platform:errors",
         "@xla//xla/tsl/platform:logging",
         "@xla//xla/tsl/platform:types",
@@ -283,7 +287,6 @@ cc_library(
         ["nvtx_utils_stub.cc"],
     ),
     hdrs = ["nvtx_utils.h"],
-    local_defines = if_oss(["NVTX_VERSION_3_1=1"]),
     visibility = ["//visibility:public"],
     deps = if_cuda_is_configured(nvtx_headers()),
 )
@@ -381,5 +384,6 @@ cc_library(
     hdrs = ["scoped_memory_debug_annotation.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "@com_google_absl//absl/strings:string_view",
     ],
 )

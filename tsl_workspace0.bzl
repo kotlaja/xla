@@ -39,7 +39,7 @@ def _tf_bind():
     # Needed by Protobuf
     native.bind(
         name = "python_headers",
-        actual = str(Label("@tsl//third_party/python_runtime:headers")),
+        actual = str(Label("//third_party/python_runtime:headers")),
     )
 
     # Needed by Protobuf
@@ -116,6 +116,13 @@ def workspace():
             "https://storage.googleapis.com/mirror.tensorflow.org/github.com/bazelbuild/rules_proto/archive/11bf7c25e666dd7ddacbcd4d4c4a9de7a25175f8.tar.gz",
             "https://github.com/bazelbuild/rules_proto/archive/11bf7c25e666dd7ddacbcd4d4c4a9de7a25175f8.tar.gz",
         ],
+    )
+
+    http_archive(
+        name = "rules_shell",
+        sha256 = "bc61ef94facc78e20a645726f64756e5e285a045037c7a61f65af2941f4c25e1",
+        strip_prefix = "rules_shell-0.4.1",
+        url = "https://github.com/bazelbuild/rules_shell/releases/download/v0.4.1/rules_shell-v0.4.1.tar.gz",
     )
 
     # Now, finally use the rules

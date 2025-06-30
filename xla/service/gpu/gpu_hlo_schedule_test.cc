@@ -21,12 +21,17 @@ limitations under the License.
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/algorithm/container.h"
+#include "absl/base/log_severity.h"
 #include "absl/log/log.h"
+#include "absl/log/log_sink.h"
+#include "absl/log/scoped_mock_log.h"
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
 #include "xla/hlo/analysis/hlo_ordering.h"
@@ -34,6 +39,7 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
+#include "xla/hlo/ir/hlo_module.h"
 #include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/hlo/ir/hlo_schedule.h"
 #include "xla/hlo/testlib/filecheck.h"
@@ -48,15 +54,17 @@ limitations under the License.
 #include "xla/tests/hlo_test_base.h"
 #include "xla/tests/test_utils.h"
 #include "xla/tsl/lib/core/status_test_util.h"
-#include "tsl/platform/status.h"
-#include "tsl/platform/status_matchers.h"
-#include "tsl/platform/statusor.h"
+#include "xla/tsl/platform/logging.h"
+#include "xla/tsl/platform/status.h"
+#include "xla/tsl/platform/statusor.h"
 #include "tsl/profiler/protobuf/profiled_instructions.pb.h"
 
 namespace xla {
 namespace gpu {
 
+using ::testing::_;
 using ::testing::ElementsAre;
+using ::testing::EndsWith;
 using ::tsl::testing::StatusIs;
 
 class GpuHloScheduleTest : public HloTestBase {
@@ -106,7 +114,6 @@ class GpuHloScheduleTest : public HloTestBase {
     // Verify that the fingerprint of HLO prior to LHS is present.
     const FrontendAttributes& attrs = module->frontend_attributes();
     auto it = attrs.map().find(kFingerprintBeforeLHS);
-
     // The fingerprint is 128 bits stored as a hex string (128/4 hex digits).
     return it != attrs.map().end() && it->second.size() == 128 / 4;
   }
@@ -1741,6 +1748,71 @@ TEST_F(GpuHloScheduleTest, DiscountCPUMemoryFromGPUPeakMemoryUsage) {
 // CHECK: copy-done.h2d = f32[1024]{0} copy-done
 )"));
 }
+
+TEST_F(GpuHloScheduleTest, ReturnsValidScheduleMetadata) {
+  constexpr absl::string_view kHloText = R"(
+    HloModule m
+
+    ENTRY ar {
+      p0 = f32[32,32] parameter(0)
+      p1 = f32[32,32] parameter(1)
+
+      ROOT _ = f32[32,32]{1,0} custom-call(p0, p1),
+        custom_call_target="__cublas$gemm"
+    })";
+  HloModuleConfig module_config;
+  constexpr uint64_t kMemoryLimitLarge = 22000;
+  module_config.set_device_memory_size(kMemoryLimitLarge);
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto module, ParseAndReturnVerifiedModule(kHloText, module_config));
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto metadata,
+      ScheduleGpuModule(
+          module.get(), /*pointer_size=*/8,
+          backend().default_stream_executor()->GetDeviceDescription()));
+  EXPECT_GT(metadata.scheduler_mem_limit, 0);
+}
+
+// This test verifies that the scheduling logs an error if the size of
+// input/output arguments exceeds the base limit.
+TEST_F(GpuHloScheduleTest, LogAnErrorWhenArgumentSizeExceedsMemoryLimit) {
+  constexpr absl::string_view kHloText = R"(
+    HloModule m
+
+    ENTRY ar {
+      p0 = f32[32,32] parameter(0)
+      p1 = f32[32,32] parameter(1)
+
+      ROOT _ = f32[32,32]{1,0} custom-call(p0, p1),
+        custom_call_target="__cublas$gemm"
+    })";
+  HloModuleConfig module_config;
+  constexpr uint64_t kMemoryLimitSmall = 1;
+  module_config.set_device_memory_size(kMemoryLimitSmall);
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto module, ParseAndReturnVerifiedModule(kHloText, module_config));
+
+  absl::ScopedMockLog mock_log(absl::MockLogDefault::kIgnoreUnexpected);
+  // absl::ScopedMockLog only works if we're actually using ABSL logging, and
+  // TSL supports a homegrown logging implementation, so we should only check
+  // the log is emitted when ABSL logging is used.
+  if constexpr (std::is_same_v<absl::LogSink, tsl::TFLogSink>) {
+    EXPECT_CALL(mock_log,
+                Log(absl::LogSeverity::kError, _,
+                    EndsWith("This indicates an error in the calculation!")))
+        .Times(1);
+  }
+  mock_log.StartCapturingLogs();
+  TF_ASSERT_OK_AND_ASSIGN(
+      auto metadata,
+      ScheduleGpuModule(
+          module.get(), /*pointer_size=*/8,
+          backend().default_stream_executor()->GetDeviceDescription()));
+  EXPECT_EQ(metadata.scheduler_mem_limit, 0);
+}
+
+
 
 }  // namespace gpu
 }  // namespace xla

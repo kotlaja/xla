@@ -35,11 +35,13 @@ limitations under the License.
 #include "absl/strings/str_replace.h"
 #include "absl/strings/string_view.h"
 #include "re2/re2.h"
+#include "xla/hlo/analysis/alias_info.h"
 #include "xla/hlo/analysis/hlo_alias_analysis.h"
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_module.h"
 #include "xla/hlo/ir/hlo_opcode.h"
+#include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
 #include "xla/hlo/testlib/verified_hlo_module.h"
 #include "xla/hlo/utils/hlo_live_range.h"
 #include "xla/service/buffer_value.h"
@@ -56,7 +58,6 @@ limitations under the License.
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/status_macros.h"
-#include "xla/tests/hlo_test_base.h"
 #include "xla/tsl/lib/core/status_test_util.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
@@ -261,7 +262,7 @@ TEST_F(LoopOptimizerBestFitHeapTest, TestRemoveChunk) {
   EXPECT_EQ(heap_.LastMemoryOffsetOccupied(), 0);
 }
 
-class MemoryBoundLoopOptimizerTest : public HloTestBase {
+class MemoryBoundLoopOptimizerTest : public HloHardwareIndependentTestBase {
  public:
   MemoryBoundLoopOptimizerTest() = default;
 
@@ -278,7 +279,8 @@ class MemoryBoundLoopOptimizerTest : public HloTestBase {
     optimizer_options.set_allow_unsatisfied_fully_pipelined_prefetch(false);
     optimizer_options.set_min_num_iterations(3.0);
     options_.memory_bound_loop_optimizer_options = optimizer_options;
-    cost_analysis_options_.alternate_mem_bandwidth_bytes_per_second = 128;
+    cost_analysis_options_.alternate_mem_read_bandwidth_bytes_per_second = 128;
+    cost_analysis_options_.alternate_mem_write_bandwidth_bytes_per_second = 128;
     cost_analysis_options_.default_mem_bandwidth_bytes_per_second = 32;
     cost_analysis_options_.pipeline_overhead_window_size_mib = 1;
     options.set_flops_per_second(16);
@@ -553,7 +555,7 @@ ENTRY Entry {
 
     std::unique_ptr<PresetAssignments> preset_assignments =
         MemorySpaceAssignment::Run(module, *live_range_, *alias_analysis_,
-                                   options_)
+                                   &alias_info_, options_)
             .value();
     return preset_assignments;
   }
@@ -695,6 +697,7 @@ ENTRY Entry {
   std::unique_ptr<OpCostManager> op_cost_manager_;
   std::unique_ptr<CostAnalysis> cost_analysis_;
   std::unique_ptr<HloAliasAnalysis> alias_analysis_;
+  AliasInfo alias_info_;
   std::unique_ptr<HloLiveRange> live_range_;
   std::unique_ptr<MemoryBoundLoopOptimizer> optimizer_;
 };

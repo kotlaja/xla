@@ -18,6 +18,7 @@ limitations under the License.
 #include <atomic>
 #include <cstddef>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
@@ -33,6 +34,52 @@ limitations under the License.
 
 namespace xla::cpu {
 namespace {
+
+TEST(WorkQueueTest, WorkQueuePartitions) {
+  auto task_range = [](size_t begin, size_t end) {
+    return std::make_pair(begin, end);
+  };
+
+  {
+    WorkQueue queue(/*num_tasks=*/2, /*num_partitions=*/4);
+    EXPECT_EQ(queue.partition_range(0), task_range(0, 1));
+    EXPECT_EQ(queue.partition_range(1), task_range(1, 2));
+    EXPECT_EQ(queue.partition_range(2), task_range(2, 2));
+    EXPECT_EQ(queue.partition_range(3), task_range(2, 2));
+  }
+
+  {
+    WorkQueue queue(/*num_tasks=*/4, /*num_partitions=*/4);
+    EXPECT_EQ(queue.partition_range(0), task_range(0, 1));
+    EXPECT_EQ(queue.partition_range(1), task_range(1, 2));
+    EXPECT_EQ(queue.partition_range(2), task_range(2, 3));
+    EXPECT_EQ(queue.partition_range(3), task_range(3, 4));
+  }
+
+  {
+    WorkQueue queue(/*num_tasks=*/5, /*num_partitions=*/4);
+    EXPECT_EQ(queue.partition_range(0), task_range(0, 2));
+    EXPECT_EQ(queue.partition_range(1), task_range(2, 3));
+    EXPECT_EQ(queue.partition_range(2), task_range(3, 4));
+    EXPECT_EQ(queue.partition_range(3), task_range(4, 5));
+  }
+
+  {
+    WorkQueue queue(/*num_tasks=*/9, /*num_partitions=*/4);
+    EXPECT_EQ(queue.partition_range(0), task_range(0, 3));
+    EXPECT_EQ(queue.partition_range(1), task_range(3, 5));
+    EXPECT_EQ(queue.partition_range(2), task_range(5, 7));
+    EXPECT_EQ(queue.partition_range(3), task_range(7, 9));
+  }
+
+  {
+    WorkQueue queue(/*num_tasks=*/14, /*num_partitions=*/4);
+    EXPECT_EQ(queue.partition_range(0), task_range(0, 4));
+    EXPECT_EQ(queue.partition_range(1), task_range(4, 8));
+    EXPECT_EQ(queue.partition_range(2), task_range(8, 11));
+    EXPECT_EQ(queue.partition_range(3), task_range(11, 14));
+  }
+}
 
 TEST(WorkQueueTest, WorkQueueSimple) {
   WorkQueue queue(20, 10);
@@ -127,15 +174,40 @@ TEST(WorkQueueTest, WorkerConcurrency) {
 
 TEST(WorkQueueTest, WorkerParallelize) {
   tsl::thread::ThreadPool threads(tsl::Env::Default(), "test", 8);
-  Eigen::ThreadPoolDevice device(threads.AsEigenThreadPool(), 8);
 
   std::vector<size_t> data(1024, 0);
 
-  auto event = Worker::Parallelize(
-      &device, 128, 1024, [&](size_t task_index) { ++data[task_index]; });
+  auto event =
+      Worker::Parallelize(threads.AsEigenThreadPool(), 128, 1024,
+                          [&](size_t task_index) { ++data[task_index]; });
   tsl::BlockUntilReady(event);
 
   std::vector<size_t> expected(1024, 1);
+  EXPECT_EQ(data, expected);
+}
+
+TEST(WorkQueueTest, WorkerParallelizeDeadlockProof) {
+  tsl::thread::ThreadPool threads(tsl::Env::Default(), "test", 8);
+
+  std::vector<size_t> data(10 * 1024, 0);
+  absl::BlockingCounter counter(10);
+
+  // Dispatch and wait for parallel loops completion in the same thread pool
+  // where they execute, to test that this work scheduling pattern doesn't lead
+  // to deadlocks.
+  for (size_t i = 0; i < 10; ++i) {
+    threads.Schedule([&, i] {
+      auto event = Worker::Parallelize(
+          threads.AsEigenThreadPool(), 32, 1024,
+          [&](size_t task_index) { ++data[i * 1024 + task_index]; });
+      tsl::BlockUntilReady(event);
+      counter.DecrementCount();
+    });
+  }
+
+  counter.Wait();
+
+  std::vector<size_t> expected(10 * 1024, 1);
   EXPECT_EQ(data, expected);
 }
 

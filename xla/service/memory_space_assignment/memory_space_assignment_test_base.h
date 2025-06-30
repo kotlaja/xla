@@ -17,14 +17,20 @@ limitations under the License.
 #define XLA_SERVICE_MEMORY_SPACE_ASSIGNMENT_MEMORY_SPACE_ASSIGNMENT_TEST_BASE_H_
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
+#include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/status/statusor.h"
+#include "absl/types/span.h"
+#include "xla/hlo/analysis/alias_info.h"
 #include "xla/hlo/analysis/hlo_alias_analysis.h"
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
@@ -118,7 +124,10 @@ class MemorySpaceAssignmentTestBase : public HloTestBase {
   static CostAnalysisOptions DefaultCostAnalysisOptions() {
     CostAnalysisOptions options;
     options.default_mem_bandwidth_bytes_per_second = kDefaultMemBandwidth;
-    options.alternate_mem_bandwidth_bytes_per_second = kAlternateMemBandwidth;
+    options.alternate_mem_read_bandwidth_bytes_per_second =
+        kAlternateMemBandwidth;
+    options.alternate_mem_write_bandwidth_bytes_per_second =
+        kAlternateMemBandwidth;
     return options;
   }
 
@@ -128,6 +137,39 @@ class MemorySpaceAssignmentTestBase : public HloTestBase {
     options.max_outstanding_evictions = max_async_copies;
 
     return options;
+  }
+
+  // Creates an MsaBufferIntervalCompare function that prioritizes the
+  // instructions named in prioritized_instruction_names, in the order
+  // specified. We default to alphabetical instruction name order for the
+  // remaining instructions.
+  static MsaBufferIntervalCompare
+  CreateBufferIntervalCompareFnFromInstructionNames(
+      std::vector<std::string> prioritized_instruction_names) {
+    absl::flat_hash_map<std::string, size_t> instruction_name_to_priority;
+    // A lower priority value means its higher on the Msa sort list.
+    for (size_t i = 0; i < prioritized_instruction_names.size(); ++i) {
+      instruction_name_to_priority[prioritized_instruction_names[i]] = i;
+    }
+    return [instruction_name_to_priority =
+                std::move(instruction_name_to_priority)](
+               const MsaBufferInterval& a, const MsaBufferInterval& b) {
+      auto get_sort_tuple = [&instruction_name_to_priority](
+                                const MsaBufferInterval& buffer_interval) {
+        auto it = instruction_name_to_priority.find(
+            buffer_interval.buffer->defining_instruction()->name());
+        if (it != instruction_name_to_priority.end()) {
+          return std::make_tuple(
+              it->second,
+              buffer_interval.buffer->defining_instruction()->name());
+        }
+        return std::make_tuple(
+            instruction_name_to_priority.size(),
+            buffer_interval.buffer->defining_instruction()->name());
+      };
+
+      return get_sort_tuple(a) < get_sort_tuple(b);
+    };
   }
 
   std::unique_ptr<PresetAssignments> AssignMemorySpaceUsingCostAnalysis(
@@ -275,9 +317,10 @@ class MemorySpaceAssignmentTestBase : public HloTestBase {
                         HloLiveRange::Run(module->schedule(), *alias_analysis,
                                           module->entry_computation()));
 
-    TF_ASSIGN_OR_RETURN(std::unique_ptr<PresetAssignments> preset_assignments,
-                        MemorySpaceAssignment::Run(module, *hlo_live_range,
-                                                   *alias_analysis, options));
+    TF_ASSIGN_OR_RETURN(
+        std::unique_ptr<PresetAssignments> preset_assignments,
+        MemorySpaceAssignment::Run(module, *hlo_live_range, *alias_analysis,
+                                   &alias_info_, options));
     if (check_parameters_in_default_memory) {
       CheckParametersInDefaultMemory(module);
     }
@@ -452,6 +495,7 @@ class MemorySpaceAssignmentTestBase : public HloTestBase {
   }
 
   CostAnalysis::Cache cache_;
+  AliasInfo alias_info_;
 };
 
 }  // namespace memory_space_assignment

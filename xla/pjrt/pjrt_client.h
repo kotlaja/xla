@@ -58,16 +58,16 @@ limitations under the License.
 #include "xla/tsl/framework/allocator.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
-#include "tsl/platform/errors.h"
-#include "tsl/platform/statusor.h"
 
 // API notes:
 // PjRt stands for "Pretty much Just another RunTime".
-
 namespace xla {
 
 class PjRtClient;
 class PjRtDevice;
+class PjRtLoadedExecutable;
+class PjRtExecutableForwarder;
+struct CompileOptions;
 
 class PjRtMemorySpace {
  public:
@@ -311,13 +311,13 @@ class PjRtChunk {
     }
   }
 
-  PjRtChunk(PjRtChunk&& other)
+  PjRtChunk(PjRtChunk&& other) noexcept
       : data_(other.data_),
         size_(other.size_),
         deleter_(std::move(other.deleter_)) {
     other.data_ = nullptr;
   }
-  PjRtChunk& operator=(PjRtChunk&& other) {
+  PjRtChunk& operator=(PjRtChunk&& other) noexcept {
     if (data_) {
       deleter_(data_);
     }
@@ -594,15 +594,24 @@ class PjRtClient {
   }
 
   // Compile `computation` with given `options`.
-  virtual absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>> Compile(
+  virtual absl::StatusOr<std::unique_ptr<PjRtExecutable>> Compile(
       const XlaComputation& computation, CompileOptions options) {
-    return Unimplemented("Compile with options is not supported.");
+    return Unimplemented("Compile with XlaComputation is not supported.");
+  }
+  virtual absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>> CompileAndLoad(
+      const XlaComputation& computation, CompileOptions options) {
+    return Unimplemented(
+        "CompileAndLoad with XlaComputation is not supported.");
   }
 
   // Variant of `Compile` that accepts an MLIR module.
-  virtual absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>> Compile(
+  virtual absl::StatusOr<std::unique_ptr<PjRtExecutable>> Compile(
       mlir::ModuleOp module, CompileOptions options) {
     return Unimplemented("Compile with MLIR Module is not supported.");
+  }
+  virtual absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>> CompileAndLoad(
+      mlir::ModuleOp module, CompileOptions options) {
+    return Unimplemented("CompileAndLoad with MLIR Module is not supported.");
   }
 
   // Deserializes a serialized executable as produced by
@@ -612,15 +621,17 @@ class PjRtClient {
   // Pending completion of b/237720161, `options` is a mandatory argument in
   // most implementations of this interface. They _are_ optional for
   // implementations related to the PJRT C API.
-  virtual absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>>
-  DeserializeExecutable(absl::string_view serialized,
-                        std::optional<CompileOptions> options) {
-    return Unimplemented("Deserialize is not supported.");
+  virtual absl::StatusOr<std::unique_ptr<PjRtExecutable>> DeserializeExecutable(
+      absl::string_view serialized, std::optional<CompileOptions> options) {
+    return Unimplemented("Deserializing serialized executable not supported.");
   }
 
   // LoadSerializedExecutable takes the serialized output of PjRtExecutable. The
   // returned executable is loaded by this client. The same checks are made as
   // in Load that the serialized executable is compatible with the client.
+  //
+  // If `options` are provided, then they override the compile options
+  // from the serialized executable (`serialized`).
   virtual absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>>
   LoadSerializedExecutable(absl::string_view serialized,
                            std::optional<CompileOptions> options,
@@ -856,22 +867,17 @@ class PjRtClient {
   // completes on the return value before letting literal go out of scope.
   virtual absl::StatusOr<std::unique_ptr<PjRtBuffer>> BufferFromHostLiteral(
       const LiteralSlice& literal, PjRtMemorySpace* memory_space) {
-    return tsl::errors::Unimplemented(
-        "BufferFromHostLiteral with PjRtMemorySpace is not implemented on "
-        "platform: ",
-        platform_name());
+    return this->BufferFromHostLiteral(literal, memory_space,
+                                       /*device_layout=*/nullptr);
   }
 
   virtual absl::StatusOr<std::unique_ptr<PjRtBuffer>> BufferFromHostLiteral(
       const LiteralSlice& literal, PjRtMemorySpace* memory_space,
       const Layout* device_layout) {
-    if (device_layout) {
-      return absl::UnimplementedError(absl::StrCat(
-          "BufferFromHostLiteral with device_layout is not implemented on "
-          "platform: ",
-          platform_name()));
-    }
-    return this->BufferFromHostLiteral(literal, memory_space);
+    return tsl::errors::Unimplemented(
+        "BufferFromHostLiteral with PjRtMemorySpace is not implemented on "
+        "platform: ",
+        platform_name());
   }
 
   // Creates a PjRtBuffer that is a non-owned view of an on-device
@@ -923,49 +929,6 @@ class PjRtClient {
     return Unimplemented("MakeCrossHostReceiveBuffers is not implemented.");
   }
 
-  // Asynchronously makes a vector of PjRtBuffers that can be used to receive
-  // cross host transfers, as in MakeCrossHostReceiveBuffers above, however
-  // each buffer expects to be "gathered" using multiple sends, one for each of
-  // a set of sub-slices of the destination buffer.
-  //
-  // For each value in shapes there is a corresponding FullGatherDetails struct
-  // that describes the sub-slices.
-  struct GatherDetails {
-    // The dimensions of the corresponding buffer that the gather slices
-    // into. These dimensions must be the major dimensions in the on-device
-    // layout of the buffer, and must all be untiled. The scatter acts as if
-    // the buffer were transposed/reshaped so that all of these dimensions were
-    // combined into a single dimension whose size is the product of the
-    // dimensions, and the slice indices correspond to indices in that single
-    // combined dimension.
-    //
-    // For example, if the shape is [3, 4, 128, 128] with [3, 4] as the major
-    // dimensions in the layout, and dimensions = {0, 1}, then the buffer is
-    // treated as if it were shape [12, 128, 128] and the indices in
-    // slice_boundaries range in [0, 12].
-    absl::InlinedVector<int, 3> dimensions;
-    // The cumulative indices in dimension of the slices. For example, if
-    // shape.dimensions(dimension)==10, setting slice_boundaries to {2, 5, 10}
-    // would correspond to 3 slices of sizes {2, 3, 5} respectively. If the last
-    // entry in slice_boundaries is less than the size of the combined gather
-    // dimension, the trailing data in the buffer is undefined after the receive
-    // completes.
-    std::vector<int64_t> slice_boundaries;
-  };
-  virtual absl::StatusOr<std::vector<std::unique_ptr<PjRtBuffer>>>
-  MakeCrossHostReceiveBuffersForGather(
-      absl::Span<const Shape> shapes, std::vector<GatherDetails> gather_details,
-      PjRtDevice* device, PjRtCrossHostRecvNotifier notifier) {
-    return Unimplemented(
-        "MakeCrossHostReceiveBuffersForGather is not implemented.");
-  }
-
-  // TODO(zhangqiaorjc): Experimental API to be removed.
-  // Defragment device memory.
-  virtual absl::Status Defragment() {
-    return Unimplemented("Defragment is not implemented.");
-  }
-
   // Return the PjRtHostMemoryForDeviceManager for this client. It can be
   // nullptr if the implementation does not provide one.
   virtual PjRtHostMemoryForDeviceManager* GetPjRtHostMemoryForDeviceManager()
@@ -980,7 +943,8 @@ class PjRtClient {
                          platform_name());
   }
 
-  // Experimental: Unmaps memory for fast transfers.
+  // Experimental: Unmaps memory for fast transfers. Caller is responsible to
+  // ensure that all data transfers are complete before calling DmaUnmap.
   virtual absl::Status DmaUnmap(void* data) {
     return Unimplemented("DmaUnmap not supported on platform %s",
                          platform_name());
@@ -1008,7 +972,8 @@ class PjRtBuffer {
 
   // Returned dimensions have lifetime of this buffer.
   virtual absl::Span<const int64_t> dimensions() const {
-    return on_device_shape().dimensions();
+    return on_device_shape().IsArray() ? on_device_shape().dimensions()
+                                       : absl::Span<const int64_t>();
   }
 
   // The on-device memory layout of this buffer. Returned via shared_ptr to make
@@ -1269,32 +1234,6 @@ class PjRtBuffer {
       std::function<void(absl::Status status, bool sends_were_enqueued)>;
   virtual void CopyToRemoteDevice(PjRtFuture<std::string> serialized_descriptor,
                                   RemoteSendCallback on_done) = 0;
-  struct ScatterDetails {
-    // The dimensions of the corresponding buffer that the scatter slices
-    // across. These dimensions must be the major dimensions in the on-device
-    // layout of the buffer, and must all be untiled. The scatter acts as if
-    // the buffer were transposed/reshaped so that all of these dimensions were
-    // combined into a single dimension whose size is the product of the
-    // dimensions, and the slice indices correspond to indices in that single
-    // combined dimension.
-    //
-    // For example, if the shape is [3, 4, 128, 128] with [3, 4] as the major
-    // dimensions in the layout, and dimensions = {0, 1}, then the buffer is
-    // treated as if it were shape [12, 128, 128] and the indices in slices
-    // range in [0, 12].
-    absl::InlinedVector<int, 3> dimensions;
-    // The start and end indices of the slices.
-    std::vector<std::pair<int64_t, int64_t>> slices;
-  };
-  // Each entry in `callbacks` will be called exactly once. As above, in error
-  // situations, this may happen before the corresponding entry in
-  // `serialaized_descriptors` is fulfilled. This method requires that both
-  // `calbacks.size()` and (if Ok) `serialized_descriptors.size()` match the
-  // product of the major dimensions specified in `scatter_details`.
-  virtual void CopyToRemoteDeviceScattered(
-      PjRtFuture<std::vector<std::string>> serialized_descriptors,
-      std::vector<RemoteSendCallback> callbacks,
-      const ScatterDetails& scatter_details) = 0;
 
   // Donates 'this' and returns a new buffer that is ready only when both 'this'
   // and 'dependency' are ready.
@@ -1320,20 +1259,6 @@ class PjRtBuffer {
   // even if the buffer is subsequently donated or deleted.
   virtual PjRtFuture<> GetReadyFuture() = 0;
 
-  // Blocks the host until the buffer's value has been computed and is ready for
-  // immediate use on the device. Useful in particular for timing benchmarks.
-  ABSL_DEPRECATED("Use GetReadyFuture().Await() instead")
-  absl::Status BlockHostUntilReady() {
-    auto s = GetReadyFuture().Await();
-    // Fix up error string because some clients rely on it.
-    if (!s.ok() &&
-        s.message() == "GetReadyFuture() called on deleted or donated buffer") {
-      return InvalidArgument(
-          "BlockHostUntilReady() called on deleted or donated buffer");
-    }
-    return s;
-  }
-
   // Whether this buffer is on CPU and thus allows for certain optimizations.
   virtual bool IsOnCpu() const = 0;
 };
@@ -1342,19 +1267,26 @@ class PjRtBuffer {
 // device-allocated literals. If any input/output alias has been specified in
 // the computation, the parameter containing the input buffer will be donated
 // when passed to the execution.
-class PjRtLoadedExecutable : public PjRtExecutable {
+class PjRtLoadedExecutable {
  public:
-  ~PjRtLoadedExecutable() override = default;
+  PjRtLoadedExecutable() {
+    executable_forwarder_ = std::make_unique<PjRtExecutableForwarder>(this);
+  }
+
+  virtual ~PjRtLoadedExecutable() = default;
 
   virtual PjRtClient* client() const = 0;
 
   virtual const DeviceAssignment& device_assignment() const = 0;
 
+  // Returns the PjRtExecutable that this PjRtLoadedExecutable wraps.
+  virtual PjRtExecutable* GetExecutable() const;
+
   // Returns named values for cost properties of this executable (such as
   // operations, size of input/outputs, and run time estimate). Properties may
   // differ for different platforms.
-  absl::StatusOr<absl::flat_hash_map<std::string, PjRtValueType>>
-  GetCostAnalysis() const override;
+  virtual absl::StatusOr<absl::flat_hash_map<std::string, PjRtValueType>>
+  GetCostAnalysis() const;
 
   // The replica and partition indices of device_assignment to be run by this
   // client. On single-host platforms without partitioning, this is all replicas
@@ -1483,14 +1415,96 @@ class PjRtLoadedExecutable : public PjRtExecutable {
   // True if on-device resources associated with the executable are freed.
   virtual bool IsDeleted() = 0;
 
-  // True if the `returned_futures` output parameter is supported in the
-  // Execute*() methods.
-  //
-  // TODO(b/240696624): Although the PjRt interface require `returned_futures`
-  // to be resized correctly if it is not nullopt, some implementation does not
-  // implement this. So we have to check whether returned_futures is empty.
-  // Remove this method once the implementation is fixed.
-  virtual bool IsReturnedFutureSupported() const { return false; }
+  // These are all forwarding methods for convenience, wrapping the
+  // corresponding methods on the wrapped PjRtExecutable.
+  virtual int num_replicas() const { return GetExecutable()->num_replicas(); }
+
+  virtual int num_partitions() const {
+    return GetExecutable()->num_partitions();
+  }
+
+  virtual int64_t SizeOfGeneratedCodeInBytes() const {
+    return GetExecutable()->SizeOfGeneratedCodeInBytes();
+  }
+
+  // Unique name for this executable, e.g., HloModule name.
+  virtual absl::string_view name() const { return GetExecutable()->name(); }
+
+  // Return an array of HloModule (optimized) per partition.
+  virtual absl::StatusOr<std::vector<std::shared_ptr<HloModule>>>
+  GetHloModules() const {
+    return GetExecutable()->GetHloModules();
+  }
+
+  // Returns an output Shape per program, the size should be equal to
+  // `GetHloModules()`.
+  virtual absl::StatusOr<std::vector<Shape>> GetOutputShapes() const {
+    return GetExecutable()->GetOutputShapes();
+  }
+
+  // Returns a list of element types for each output, the size of the outer list
+  // should be equal to `GetHloModules()`.
+  virtual absl::StatusOr<std::vector<std::vector<PrimitiveType>>>
+  GetOutputElementTypes() const {
+    return GetExecutable()->GetOutputElementTypes();
+  }
+
+  // Returns a list of dimensions for each output, the size of the outer list
+  // should be equal to `GetHloModules()`.
+  virtual absl::StatusOr<std::vector<std::vector<DimensionVector>>>
+  GetOutputDimensions() const {
+    return GetExecutable()->GetOutputDimensions();
+  }
+
+  // Returns a list of parameter OpSharding protos.
+  virtual std::optional<std::vector<OpSharding>> GetParameterShardings() const {
+    return GetExecutable()->GetParameterShardings();
+  }
+
+  // Returns a list of output OpSharding protos.
+  virtual std::optional<std::vector<OpSharding>> GetOutputShardings() const {
+    return GetExecutable()->GetOutputShardings();
+  }
+
+  // Return memory stats that allow callers to estimate device memory usage
+  // when running this executable.
+  virtual absl::StatusOr<CompiledMemoryStats> GetCompiledMemoryStats() const {
+    return GetExecutable()->GetCompiledMemoryStats();
+  }
+
+  // Serialize this executable into a string and return the value.
+  virtual absl::StatusOr<std::string> SerializeExecutable() const {
+    return GetExecutable()->SerializeExecutable();
+  }
+
+  virtual absl::StatusOr<std::string> FingerprintExecutable() const {
+    return GetExecutable()->FingerprintExecutable();
+  }
+
+  // Returns the layout of each input parameter.
+  virtual absl::StatusOr<std::vector<std::shared_ptr<const PjRtLayout>>>
+  GetParameterLayouts() const {
+    return GetExecutable()->GetParameterLayouts();
+  }
+
+  // Returns the layout of each output.
+  virtual absl::StatusOr<std::vector<std::shared_ptr<const PjRtLayout>>>
+  GetOutputLayouts() const {
+    return GetExecutable()->GetOutputLayouts();
+  }
+
+  // Returns a list of lists of memory kind strings for output. The returned
+  // should be equal to `GetHloModules()`.
+  virtual absl::StatusOr<std::vector<std::vector<absl::string_view>>>
+  GetOutputMemoryKinds() const {
+    return GetExecutable()->GetOutputMemoryKinds();
+  }
+
+  // Returns the compile options used to compile the executable
+  virtual absl::StatusOr<struct CompileOptions> GetCompileOptions() const {
+    return GetExecutable()->GetCompileOptions();
+  }
+  // end of convenience forwarding methods
 
  protected:
   // Value returned internally from routines that enqueue an execution,
@@ -1500,6 +1514,80 @@ class PjRtLoadedExecutable : public PjRtExecutable {
     std::optional<PjRtFuture<>> future;
     std::vector<std::unique_ptr<PjRtBuffer>> buffers;
   };
+
+ private:
+  std::unique_ptr<PjRtExecutableForwarder> executable_forwarder_;
+};
+
+// This class is used to provide a wrapper around a PjRtLoadedExecutable that
+// implements the PjRtExecutable interface, allowing that PjRtLoadedExecutable
+// to be treated like a PjRtExecutable. This is useful for plugins that do not
+// not support AoT compilation, for example, as they have no concept of an
+// "unloaded" executable.
+class PjRtExecutableForwarder : public PjRtExecutable {
+ public:
+  explicit PjRtExecutableForwarder(const PjRtLoadedExecutable* executable)
+      : executable_(executable) {}
+
+  explicit PjRtExecutableForwarder(
+      std::unique_ptr<PjRtLoadedExecutable> executable)
+      : owned_executable_(std::move(executable)) {
+    executable_ = owned_executable_.get();
+  }
+
+  int num_replicas() const override { return executable_->num_replicas(); }
+
+  int num_partitions() const override { return executable_->num_partitions(); }
+
+  int64_t SizeOfGeneratedCodeInBytes() const override {
+    return executable_->SizeOfGeneratedCodeInBytes();
+  }
+
+  // Unique name for this executable, e.g., HloModule name.
+  absl::string_view name() const override { return executable_->name(); }
+
+  // Return an HloModule (optimized) per partition.
+  absl::StatusOr<std::vector<std::shared_ptr<HloModule>>> GetHloModules()
+      const override {
+    return executable_->GetHloModules();
+  }
+
+  // Returns a list of lists of memory kind strings for output. The returned
+  // value is `[num_programs, num_output]`. The size of the outer list should
+  // be equal to `GetHloModules()`. Under SPMD, one can use
+  // `GetOutputMemoryKinds().front()`.
+  absl::StatusOr<std::vector<std::vector<absl::string_view>>>
+  GetOutputMemoryKinds() const override {
+    return executable_->GetOutputMemoryKinds();
+  }
+
+  // Returns named values for cost properties of this executable (such as
+  // operations, size of input/outputs, and run time estimate). Properties may
+  // differ for different platforms.
+  absl::StatusOr<absl::flat_hash_map<std::string, PjRtValueType>>
+  GetCostAnalysis() const override {
+    return executable_->GetCostAnalysis();
+  }
+
+  absl::StatusOr<std::string> SerializeExecutable() const override {
+    return executable_->SerializeExecutable();
+  }
+
+  absl::StatusOr<struct CompileOptions> GetCompileOptions() const override {
+    return executable_->GetCompileOptions();
+  }
+
+  absl::StatusOr<std::string> FingerprintExecutable() const override {
+    return executable_->FingerprintExecutable();
+  }
+
+  absl::StatusOr<CompiledMemoryStats> GetCompiledMemoryStats() const override {
+    return executable_->GetCompiledMemoryStats();
+  }
+
+ private:
+  const PjRtLoadedExecutable* executable_;
+  std::unique_ptr<PjRtLoadedExecutable> owned_executable_;
 };
 
 }  // namespace xla

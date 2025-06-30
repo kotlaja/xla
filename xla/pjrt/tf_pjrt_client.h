@@ -34,6 +34,7 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "xla/hlo/builder/xla_computation.h"
 #include "xla/hlo/ir/hlo_module.h"
 #include "xla/layout.h"
@@ -47,8 +48,8 @@ limitations under the License.
 #include "xla/service/hlo_cost_analysis.h"
 #include "xla/shape.h"
 #include "xla/util.h"
+#include "xla/xla_data.pb.h"
 #include "tsl/platform/casts.h"
-#include "tsl/platform/errors.h"
 
 namespace xla {
 
@@ -104,14 +105,6 @@ class TfPjRtBuffer : public PjRtBuffer {
                           RemoteSendCallback on_done) override {
     wrapped_->CopyToRemoteDevice(std::move(serialized_descriptor),
                                  std::move(on_done));
-  }
-  void CopyToRemoteDeviceScattered(
-      PjRtFuture<std::vector<std::string>> serialized_descriptors,
-      std::vector<RemoteSendCallback> callbacks,
-      const ScatterDetails& scatter_details) override {
-    return wrapped_->CopyToRemoteDeviceScattered(
-        std::move(serialized_descriptors), std::move(callbacks),
-        scatter_details);
   }
   PjRtFuture<> GetReadyFuture() override { return wrapped_->GetReadyFuture(); }
   bool IsOnCpu() const override { return wrapped_->IsOnCpu(); }
@@ -179,9 +172,6 @@ class TfPjRtExecutable : public PjRtLoadedExecutable {
 
   void Delete() override { return wrapped_->Delete(); }
   bool IsDeleted() override { return wrapped_->IsDeleted(); }
-  bool IsReturnedFutureSupported() const override {
-    return wrapped_->IsReturnedFutureSupported();
-  }
 
   absl::StatusOr<std::string> SerializeExecutable() const override {
     return wrapped_->SerializeExecutable();
@@ -226,7 +216,7 @@ class TfPjRtClient : public PjRtClient {
   absl::StatusOr<PjRtDevice*> LookupAddressableDevice(
       PjRtLocalDeviceId local_device_id) const override {
     if (wrapped_ == nullptr) {
-      return tsl::errors::Internal(
+      return absl::InternalError(
           "Wrapped PJRT client in TfPjRtClient is already destroyed.");
     }
     return wrapped_->LookupAddressableDevice(local_device_id);
@@ -255,19 +245,21 @@ class TfPjRtClient : public PjRtClient {
       const override {
     return wrapped_->GetHloCostAnalysis();
   }
-  absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>> Compile(
+  absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>> CompileAndLoad(
       const XlaComputation& computation, CompileOptions options) override {
-    return WrapExecutable(wrapped_->Compile(computation, options));
+    return WrapExecutable(wrapped_->CompileAndLoad(computation, options));
   }
-  absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>> Compile(
+  absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>> CompileAndLoad(
       mlir::ModuleOp module, CompileOptions options) override {
-    return WrapExecutable(wrapped_->Compile(std::move(module), options));
+    return WrapExecutable(wrapped_->CompileAndLoad(std::move(module), options));
   }
 
-  absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>> DeserializeExecutable(
-      absl::string_view serialized,
-      std::optional<CompileOptions> options) override {
-    return WrapExecutable(wrapped_->DeserializeExecutable(serialized, options));
+  absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>>
+  LoadSerializedExecutable(absl::string_view serialized,
+                           std::optional<CompileOptions> options,
+                           const LoadOptions& load_options) override {
+    return WrapExecutable(
+        wrapped_->LoadSerializedExecutable(serialized, options, load_options));
   }
 
   absl::StatusOr<std::unique_ptr<PjRtBuffer>> CreateUninitializedBuffer(
@@ -315,18 +307,10 @@ class TfPjRtClient : public PjRtClient {
     return wrapped_->MakeCrossHostReceiveBuffers(shapes, device,
                                                  std::move(notifier));
   }
-  absl::StatusOr<std::vector<std::unique_ptr<PjRtBuffer>>>
-  MakeCrossHostReceiveBuffersForGather(
-      absl::Span<const Shape> shapes, std::vector<GatherDetails> gather_details,
-      PjRtDevice* device, PjRtCrossHostRecvNotifier notifier) override {
-    return wrapped_->MakeCrossHostReceiveBuffersForGather(
-        shapes, std::move(gather_details), device, std::move(notifier));
-  }
   absl::StatusOr<const PjRtTopologyDescription*> GetTopologyDescription()
       const override {
     return wrapped_->GetTopologyDescription();
   }
-  absl::Status Defragment() override { return wrapped_->Defragment(); }
 
   PjRtClient* wrapped() const { return wrapped_.get(); }
 

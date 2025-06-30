@@ -27,6 +27,7 @@ limitations under the License.
 #include "xla/codegen/kernel_spec.h"
 #include "xla/codegen/llvm_ir_kernel_source.h"
 #include "xla/runtime/buffer_use.h"
+#include "xla/service/buffer_assignment.h"
 #include "xla/stream_executor/launch_dim.h"
 #include "xla/tsl/platform/statusor.h"
 #include "xla/tsl/platform/test.h"
@@ -44,29 +45,28 @@ TEST(LlvmIrKernelEmitterTest, ParseLlvmIr) {
     }
   )";
 
-  LlvmIrKernelEmitter::KernelArg arg{1024, BufferUse::kWrite};
-  LlvmIrKernelEmitter emitter(kLlvmIr, "noop", se::ThreadDim(), {arg});
+  LlvmTestKernelEmitter::KernelArg arg{1024, BufferUse::kWrite};
+  LlvmTestKernelEmitter emitter(kLlvmIr, "noop", {}, {arg});
 
   TF_ASSERT_OK_AND_ASSIGN(KernelDefinition kernel_definition,
                           emitter.EmitKernelDefinition());
 
   // Check that LLVM IR was parsed and loaded as a LLVM IR kernel source.
-  auto [kernel_spec, kernel_source] = std::move(kernel_definition).release();
+  auto [kernel_spec, kernel_source] =
+      std::move(kernel_definition).ReleaseStorage();
 
   EXPECT_EQ(kernel_spec.name(), "noop");
 
-  // Check that kernel arguments were converted to buffer allocations.
-  ASSERT_EQ(kernel_spec.buffer_uses().size(), 1);
+  // Check that kernel results were converted to buffer allocations.
+  ASSERT_EQ(kernel_spec.result_buffers().size(), 1);
 
-  BufferUse buffer_use = kernel_spec.buffer_uses().front();
-  EXPECT_EQ(buffer_use.access(), BufferUse::kWrite);
-  EXPECT_EQ(buffer_use.slice().index(), 0);
-  EXPECT_EQ(buffer_use.slice().offset(), 0);
-  EXPECT_EQ(buffer_use.slice().size(), 1024);
+  BufferAllocation::Slice result_slice = kernel_spec.result_buffers().front();
+  EXPECT_EQ(result_slice.index(), 0);
+  EXPECT_EQ(result_slice.offset(), 0);
+  EXPECT_EQ(result_slice.size(), 1024);
 
-  auto& src = tsl::down_cast<LlvmIrKernelSource&>(*kernel_source);
   llvm::orc::ThreadSafeModule thread_safe_module =
-      std::move(src).thread_safe_module();
+      std::move(kernel_source).thread_safe_module();
   const llvm::Module::FunctionListType& functions =
       thread_safe_module.getModuleUnlocked()->getFunctionList();
   EXPECT_THAT(functions,
