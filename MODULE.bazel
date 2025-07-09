@@ -5,10 +5,10 @@ module(
 
 bazel_dep(name = "bazel_skylib", version = "1.7.1")
 bazel_dep(name = "protobuf", version = "29.3", repo_name = "com_google_protobuf")
-bazel_dep(name = "grpc", version = "1.70.1", repo_name = "com_github_grpc_grpc")
+bazel_dep(name = "grpc", version = "1.68.0", repo_name = "com_github_grpc_grpc")
 bazel_dep(name = "grpc-java", version = "1.69.0")
 bazel_dep(name = "platforms", version = "0.0.11")
-bazel_dep(name = "rules_python", version = "1.1.0")
+bazel_dep(name = "rules_python", version = "0.39.0")
 bazel_dep(name = "abseil-py", version = "2.1.0", repo_name = "absl_py")
 bazel_dep(name = "rules_cc", version = "0.1.1")
 bazel_dep(name = "zlib", version = "1.3.1")
@@ -17,12 +17,34 @@ bazel_dep(name = "boringssl", version = "0.20250212.0")
 bazel_dep(name = "cpuinfo", version = "0.0.0-20240417-3c8b153")
 bazel_dep(name = "fxdiv", version = "0.0.0-20201209-63058ef", repo_name = "FXdiv")
 bazel_dep(name = "snappy", version = "1.2.1")
+bazel_dep(name = "pybind11_bazel", version = "2.13.6")
+bazel_dep(name = "pybind11_abseil", version = "202402.0")
+bazel_dep(name = "pybind11_protobuf", version = "0.0.0-20240524-1d7a729")
+bazel_dep(name = "rules_license", version = "1.0.0")
+bazel_dep(name = "google_benchmark", version = "1.9.1", repo_name = "com_google_benchmark")
+bazel_dep(name = "rules_python_gazelle_plugin", version = "1.2.0")
+bazel_dep(name = "highwayhash", version = "0.0.0-20240305-5ad3bf8")
+bazel_dep(name = "zstd", version = "1.5.7", repo_name = "com_github_facebook_zstd")
+# bazel_dep(name = "bzip2", version = "1.0.8", repo_name = "org_bzip_bzip2")
+# -- bazel_dep definitions -- #
 
 single_version_override(
     module_name = "protobuf",
     patch_strip = 1,
     patches = ["//:protobuf_29.3.patch"],
     version = "29.3",
+)
+
+single_version_override(
+    module_name = "grpc",
+    patch_strip = 1,
+    patches = ["//third_party/grpc:grpc_bzlmod.patch"],
+    version = "1.68.0",
+)
+
+single_version_override(
+    module_name = "rules_python",
+    version = "0.39.0",
 )
 
 # Configure Python toolchains and pip dependencies.
@@ -72,16 +94,11 @@ pip.parse(
 )
 use_repo(pip, pypi_numpy = "pypi_whl_311_numpy", pypi_lit = "pypi_whl_311_lit")
 
-bazel_dep(name = "pybind11_bazel", version = "2.13.6")
-bazel_dep(name = "pybind11_abseil", version = "202402.0")
-bazel_dep(name = "pybind11_protobuf", version = "0.0.0-20240524-1d7a729")
-bazel_dep(name = "rules_license", version = "1.0.0")
-bazel_dep(name = "google_benchmark", version = "1.9.1", repo_name = "com_google_benchmark")
-bazel_dep(name = "rules_python_gazelle_plugin", version = "1.2.0")
-# -- bazel_dep definitions -- #
 
 remote_execution_configure = use_repo_rule("//tools/toolchains/remote:configure.bzl", "remote_execution_configure")
 python_repository = use_repo_rule("//third_party/py:python_repo.bzl", "python_repository")
+# http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+# tf_http_archive = use_repo_rule("//third_party:repo.bzl", "tf_http_archive")
 # -- use_repo_rule statements -- #
 
 
@@ -110,13 +127,24 @@ python_repository(
   local_wheel_exclusion_list = [  ],
 )
 
+extension_for_workspace0 = use_extension("//:extension_for_workspace0.bzl", "extension_for_workspace0")
+use_repo(extension_for_workspace0, "rules_ml_toolchain")
 
 # -- repo definitions -- #
+extension_for_cuda_json = use_extension("//:extension_for_cuda_json.bzl", "extension_for_cuda_json")
+use_repo(
+  extension_for_cuda_json, 
+  "cuda_redist_json"
+)
 
 extension_for_cuda_repo = use_extension("//:extension_for_cuda_repo.bzl", "extension_for_cuda_repo")
 use_repo(
   extension_for_cuda_repo, 
+  # "cuda_nccl",
+  "cuda_cudnn",
   "cuda_cccl",
+  "cuda_nvdisasm",
+  # "cuda_redist_json",
   "cuda_cublas",
   "cuda_cudart",
   "cuda_cupti",
@@ -127,8 +155,33 @@ use_repo(
   "cuda_cusparse",
   "cuda_cufft",
   "cuda_cusolver",
-  "cuda_nvtx")
+  "cuda_nvtx",
+)
 # End of extension `extension_for_cuda_repo`
+
+extension_for_nccl_configure = use_extension("//:extension_for_nccl_configure.bzl", "extension_for_nccl_configure")
+use_repo(
+  extension_for_nccl_configure,
+  "local_config_nccl"
+  # "cuda_nccl"
+)
+
+extension_for_cuda_nccl_repo = use_extension("//:extension_for_cuda_nccl_repo.bzl", "extension_for_cuda_nccl_repo")
+use_repo(
+  extension_for_cuda_nccl_repo,
+  "cuda_nccl",
+)
+
+
+
+extension_for_cuda_configure = use_extension("//:extension_for_cuda_configure.bzl", "extension_for_cuda_configure")
+use_repo(
+  extension_for_cuda_configure,
+  "local_config_cuda",
+  # "local_config_nccl",
+  # "cuda_nccl"
+)
+# End of extension `extension_for_cuda_configure`
 
 extension_for_tf_http_archive = use_extension("//:extension_for_tf_http_archive.bzl", "extension_for_tf_http_archive")
 use_repo(
@@ -155,8 +208,14 @@ use_repo(
   "pybind11",
   "ducc",
   "implib_so",
-  "pthreadpool")
+  "pthreadpool",
+  "com_github_nelhage_rules_boost",
+  "boost",
+  "org_lzma_lzma",
+  "org_bzip_bzip2"
+)
 # End of extension `extension_for_tf_http_archive`
+
 
 # LLVM project setup
 extension_for_llvm_raw = use_extension("//:extension_for_llvm_raw.bzl", "extension_for_llvm_raw")
@@ -173,10 +232,6 @@ extension_for_tensorrt_configure = use_extension("//:extension_for_tensorrt_conf
 use_repo(extension_for_tensorrt_configure, "local_config_tensorrt")
 # End of extension `extension_for_tensorrt_configure`
 
-extension_for_cuda_configure = use_extension("//:extension_for_cuda_configure.bzl", "extension_for_cuda_configure")
-use_repo(extension_for_cuda_configure, "local_config_cuda")
-use_repo(extension_for_cuda_configure, "local_config_nccl")
-# End of extension `extension_for_cuda_configure`
 
 extension_for_rocm_configure = use_extension("//:extension_for_rocm_configure.bzl", "extension_for_rocm_configure")
 use_repo(extension_for_rocm_configure, "local_config_rocm")
@@ -195,3 +250,32 @@ archive_override(
 )
 
 bazel_dep(name = "or-tools", repo_name = "com_google_ortools")
+
+
+
+extension_for_nvshmem_configure = use_extension("//:extension_for_nvshmem_configure.bzl", "extension_for_nvshmem_configure")
+use_repo(
+  extension_for_nvshmem_configure,
+  "local_config_nvshmem",
+)
+# End of extension `extension_for_nvshmem_configure`
+
+extension_for_nvidia_nvshmem = use_extension("//:extension_for_nvidia_nvshmem.bzl", "extension_for_nvidia_nvshmem")
+use_repo(
+  extension_for_nvidia_nvshmem,
+  "nvidia_nvshmem",
+  "nvshmem"
+)
+
+extension_for_nvshmem_redist_json = use_extension("//:extension_for_nvshmem_redist_json.bzl", "extension_for_nvshmem_redist_json")
+use_repo(
+  extension_for_nvshmem_redist_json,
+  "nvshmem_redist_json",
+)
+
+
+
+# extension_for_json_init_repository = use_extension("//:extension_for_json_init_repository.bzl", "extension_for_json_init_repository")
+# use_repo(extension_for_json_init_repository, "nvshmem_redist_json")
+# use_repo(extension_for_json_init_repository, "nvshmem_redist_json")
+# End of extension `extension_for_json_init_repository`

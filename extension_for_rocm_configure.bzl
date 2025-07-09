@@ -1,4 +1,4 @@
-load("@tsl//third_party/gpus:rocm_configure.bzl", "rocm_configure")
+load("//third_party/gpus:rocm_configure.bzl", "rocm_configure")
 # -- load statements -- #
 
 def _extension_for_rocm_configure_impl(ctx):

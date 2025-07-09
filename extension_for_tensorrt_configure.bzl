@@ -1,4 +1,4 @@
-load("@tsl//third_party/tensorrt:tensorrt_configure.bzl", "tensorrt_configure")
+load("//third_party/tensorrt:tensorrt_configure.bzl", "tensorrt_configure")
 # -- load statements -- #
 
 def _extension_for_tensorrt_configure_impl(ctx):

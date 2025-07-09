@@ -158,10 +158,11 @@ def _tf_repositories():
 
     tf_http_archive(
         name = "com_github_nelhage_rules_boost",
-        urls = tf_mirror_urls("https://github.com/nelhage/rules_boost/archive/5160325dbdc8c9e499f9d9917d913f35f1785d52.zip"),
-        strip_prefix = "rules_boost-5160325dbdc8c9e499f9d9917d913f35f1785d52",
+        urls = tf_mirror_urls("https://github.com/nelhage/rules_boost/archive/8018021402a99302d03e77a7781cd767a8fb00a9.zip"),
+        strip_prefix = "rules_boost-8018021402a99302d03e77a7781cd767a8fb00a9",
         sha256 = "feb4b1294684c79df7c1e08f1aec5da0da52021e33db59c88edbe86b4d1a017a",
     )
+
 
 # buildifier: disable=function-docstring
 # buildifier: disable=unnamed-macro

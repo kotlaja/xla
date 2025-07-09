@@ -1,4 +1,4 @@
-load("@tsl//third_party/py:python_configure.bzl", "python_configure")
+load("//third_party/py:python_configure.bzl", "python_configure")
 # -- load statements -- #
 
 def _extension_for_python_configure_impl(ctx):
